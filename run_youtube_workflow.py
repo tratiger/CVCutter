@@ -259,8 +259,19 @@ def main():
     parser.add_argument(
         "--form-csv",
         type=Path,
-        required=True,
-        help="Googleフォーム回答のCSVファイル"
+        default=None,
+        help="Googleフォーム回答のCSVファイル（CSVから取得する場合）"
+    )
+    parser.add_argument(
+        "--form-id",
+        type=str,
+        default=None,
+        help="フォームID（Forms APIから取得する場合）"
+    )
+    parser.add_argument(
+        "--use-csv",
+        action="store_true",
+        help="CSVファイルから回答を取得（デフォルト: Forms APIから取得）"
     )
     parser.add_argument(
         "--video-dir",
@@ -291,6 +302,8 @@ def main():
         run_full_workflow(
             pdf_path=args.pdf,
             form_csv_path=args.form_csv,
+            form_id=args.form_id,
+            use_forms_api=not args.use_csv,
             video_dir=args.video_dir,
             output_dir=args.output_dir,
             skip_upload=args.skip_upload,
