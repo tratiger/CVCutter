@@ -8,14 +8,12 @@ PDF解析スクリプト（Gemini CLI使用）
 - 演奏順序、演奏者名、曲名を構造化データとして出力
 """
 
-import os
-import sys
 import json
-import subprocess
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
-from .gemini_utils import run_gemini_cli
+from .gemini_utils import call_gemini_api, extract_json_from_text, configure_gemini
+from .config_manager import ConfigManager
 
 # ログ設定
 logging.basicConfig(
@@ -61,14 +59,14 @@ GEMINI_PROMPT = """
 
 def parse_pdf_with_gemini(pdf_path: Path, prompt: str = GEMINI_PROMPT) -> Optional[str]:
     """
-    Gemini CLIを使用してPDFを解析
+    Gemini APIを使用してPDFを解析
 
     Args:
         pdf_path: 解析する PDF ファイルのパス
-        prompt: Gemini CLI に送るプロンプト
+        prompt: Gemini API に送るプロンプト
 
     Returns:
-        Gemini CLI の出力（JSON 文字列を含む）
+        Gemini API の出力（JSON 文字列を含む）
     """
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDFファイルが見つかりません: {pdf_path}")
@@ -76,22 +74,24 @@ def parse_pdf_with_gemini(pdf_path: Path, prompt: str = GEMINI_PROMPT) -> Option
     logger.info(f"PDFを解析しています: {pdf_path}")
 
     try:
-        # 新しい共通ユーティリティを使用
-        args = ["-p", prompt, "--file", str(pdf_path)]
-        result = run_gemini_cli(args, capture_output=True)
-
-        if result.returncode != 0:
-            logger.error(f"Gemini CLIがエラーを返しました: {result.stderr}")
-            raise RuntimeError(f"Gemini CLI実行エラー (Code {result.returncode}): {result.stderr}")
-
-        output = result.stdout.strip()
-        logger.debug(f"Gemini CLI出力: {output[:200]}...")  # 最初の200文字のみログ
+        # APIキーの取得と設定
+        config = ConfigManager().config
+        api_key = config['workflow'].get('gemini_api_key')
+        if not api_key:
+            raise ValueError("Gemini APIキーが設定されていません。設定画面から入力してください。")
+        
+        configure_gemini(api_key)
+        
+        # API呼び出し
+        # 設定からモデル名を取得
+        model_name = config['workflow'].get('gemini_model', 'gemini-2.5-flash')
+        
+        # API呼び出し
+        output = call_gemini_api(prompt, file_path=str(pdf_path), model_name=model_name)
+        
+        logger.debug(f"Gemini API出力: {output[:200]}...")  # 最初の200文字のみログ
 
         return output
-
-    except subprocess.TimeoutExpired:
-        logger.error("Gemini CLIがタイムアウトしました")
-        raise
 
     except Exception as e:
         logger.error(f"PDF解析中にエラーが発生: {e}")

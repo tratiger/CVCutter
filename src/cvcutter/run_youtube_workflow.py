@@ -22,6 +22,8 @@ from .video_mapper import (
     generate_upload_metadata
 )
 from .youtube_uploader import batch_upload
+from .gemini_utils import configure_gemini
+from .config_manager import ConfigManager
 
 # ログ設定
 logging.basicConfig(
@@ -63,6 +65,14 @@ def run_full_workflow(
     logger.info("=" * 80)
     logger.info("YouTube動画アップロード統合ワークフロー")
     logger.info("=" * 80)
+
+    # Gemini APIの事前設定
+    config = ConfigManager().config
+    api_key = config['workflow'].get('gemini_api_key')
+    if api_key:
+        configure_gemini(api_key)
+    elif use_gemini_matching:
+        logger.warning("Gemini APIキーが設定されていません。マッピングにAIを使用できない可能性があります。")
 
     # ========================================
     # ステップ1: PDF解析

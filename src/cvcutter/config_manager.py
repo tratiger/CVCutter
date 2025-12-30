@@ -25,7 +25,9 @@ DEFAULT_CONFIG = {
     "workflow": {
         "use_forms_api": True,
         "use_gemini": True,
-        "skip_upload": False
+        "skip_upload": False,
+        "gemini_api_key": "",
+        "gemini_model": "gemini-2.5-flash"
     }
 }
 

@@ -17,6 +17,7 @@ dependencies = [
     "customtkinter>=5.2.2",
     "pillow>=11.0.0",
     "pyinstaller>=6.11.1",
+    "google-generativeai>=0.3.0",
 ]
 
 [build-system]

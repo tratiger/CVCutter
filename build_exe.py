@@ -20,7 +20,6 @@ def build():
         f'--icon=src/favicon.ico',
         f'--add-data={ctk_path};customtkinter/',
         '--add-data=src/cvcutter;cvcutter/',
-        '--add-data=node-v24.12.0-win-x64;node-v24.12.0-win-x64/',
         '--copy-metadata=imageio',
         '--collect-submodules=cv2',
         '--collect-submodules=moviepy',

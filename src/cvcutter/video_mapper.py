@@ -12,14 +12,12 @@ YouTubeアップロード用のメタデータを生成します。
 3. アンケート回答がないものは除外
 """
 
-import json
 import logging
-import subprocess
-import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
-from .gemini_utils import run_gemini_cli
+from .gemini_utils import call_gemini_api, extract_json_from_text, configure_gemini
+from .config_manager import ConfigManager
 
 # ログ設定
 logging.basicConfig(
@@ -138,7 +136,7 @@ def match_with_gemini_cli(
     form_piece: str
 ) -> Tuple[bool, float, str]:
     """
-    Gemini CLIを使って演奏者名と曲名の類似度を判定
+    Gemini APIを使って演奏者名と曲名の類似度を判定
 
     Args:
         program_performer: パンフレットの演奏者名
@@ -177,38 +175,28 @@ JSONのみを出力してください。
 """
 
     try:
-        # 新しい共通ユーティリティを使用
-        result = run_gemini_cli(["-p", prompt], capture_output=True)
-
-        if result.returncode != 0:
-            logger.error(f"Gemini CLIエラー (Code {result.returncode}): {result.stderr}")
-            return False, 0.0, "エラー"
-
-        output = result.stdout.strip()
+        # APIキーの取得と設定
+        config = ConfigManager().config
+        api_key = config['workflow'].get('gemini_api_key')
+        if not api_key:
+            raise ValueError("Gemini APIキーが設定されていません。設定画面から入力してください。")
+        
+        configure_gemini(api_key)
+        
+        # 設定からモデル名を取得
+        model_name = config['workflow'].get('gemini_model', 'gemini-2.5-flash')
+        
+        # API呼び出し
+        output = call_gemini_api(prompt, model_name=model_name)
 
         # JSON抽出
-        if "```json" in output:
-            start = output.find("```json") + 7
-            end = output.find("```", start)
-            json_str = output[start:end].strip()
-        elif "```" in output:
-            start = output.find("```") + 3
-            end = output.find("```", start)
-            json_str = output[start:end].strip()
-        else:
-            json_str = output
-
-        result_data = json.loads(json_str)
+        result_data = extract_json_from_text(output)
 
         is_match = result_data.get("is_match", False)
         confidence = float(result_data.get("confidence_score", 0))
         reason = result_data.get("reason", "")
 
         return is_match, confidence, reason
-
-    except subprocess.TimeoutExpired:
-        logger.error("Gemini CLIがタイムアウトしました")
-        return False, 0.0, "タイムアウト"
 
     except Exception as e:
         logger.error(f"マッチング判定エラー: {e}")

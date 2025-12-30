@@ -1,5 +1,4 @@
 import tkinter as tk
-import subprocess
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 from PIL import Image
@@ -19,7 +18,7 @@ from .create_google_form import create_concert_form, authenticate_forms_api, sav
 from .video_mapper import get_video_files_sorted, map_program_to_videos, map_with_form_responses
 from .google_form_connector import FormResponseParser
 from .pdf_parser import parse_concert_pdf
-from .gemini_utils import run_gemini_cli
+from .gemini_utils import configure_gemini
 
 # --- Console Redirector ---
 class ConsoleRedirector:
@@ -272,14 +271,31 @@ class ConcertVideoApp(ctk.CTk):
         gemini_frame.pack(fill=tk.X, padx=10, pady=10)
         ctk.CTkLabel(gemini_frame, text="Gemini AI 設定", font=ctk.CTkFont(weight="bold")).pack(pady=5)
         
-        row = ctk.CTkFrame(gemini_frame, fg_color="transparent")
-        row.pack(fill=tk.X, padx=5, pady=2)
-        ctk.CTkLabel(row, text="AI紐付けを使用:", width=150, anchor="w").pack(side=tk.LEFT)
+        row1 = ctk.CTkFrame(gemini_frame, fg_color="transparent")
+        row1.pack(fill=tk.X, padx=5, pady=2)
+        ctk.CTkLabel(row1, text="AI紐付けを使用:", width=150, anchor="w").pack(side=tk.LEFT)
         self.use_gemini_var = ctk.BooleanVar(value=self.config['workflow']['use_gemini'])
-        ctk.CTkCheckBox(row, text="", variable=self.use_gemini_var).pack(side=tk.LEFT)
+        ctk.CTkCheckBox(row1, text="", variable=self.use_gemini_var).pack(side=tk.LEFT)
+
+        row2 = ctk.CTkFrame(gemini_frame, fg_color="transparent")
+        row2.pack(fill=tk.X, padx=5, pady=2)
+        ctk.CTkLabel(row2, text="Gemini API Key:", width=150, anchor="w").pack(side=tk.LEFT)
+        self.gemini_key_var = ctk.StringVar(value=self.config['workflow'].get('gemini_api_key', ''))
+        ctk.CTkEntry(row2, textvariable=self.gemini_key_var, width=300, show="*").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        row3 = ctk.CTkFrame(gemini_frame, fg_color="transparent")
+        row3.pack(fill=tk.X, padx=5, pady=2)
+        ctk.CTkLabel(row3, text="Gemini モデル:", width=150, anchor="w").pack(side=tk.LEFT)
+        self.gemini_model_var = ctk.StringVar(value=self.config['workflow'].get('gemini_model', 'gemini-2.5-flash'))
+        models = [
+            "gemini-2.5-flash-lite", "gemini-2.5-flash-tts", "gemini-2.5-flash",
+            "gemini-3-flash", "gemini-robotics-er-1.5-preview", "gemma-3-12b",
+            "gemma-3-1b", "gemma-3-27b", "gemma-3-2b", "gemma-3-4b"
+        ]
+        ctk.CTkOptionMenu(row3, variable=self.gemini_model_var, values=models, width=300).pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        ctk.CTkButton(gemini_frame, text="Gemini ログイン (ブラウザが開きます)",
-                      command=self._gemini_login).pack(pady=10)
+        ctk.CTkButton(gemini_frame, text="APIキーを検証",
+                      command=self._verify_gemini).pack(pady=10)
 
         ctk.CTkButton(tab, text="設定をすべて保存", command=self._save_settings).pack(pady=20)
 
@@ -421,20 +437,23 @@ YouTubeへのアップロードとフォーム連携には、ご自身でAPIキ�
         
         threading.Thread(target=task).start()
 
-    def _gemini_login(self):
+    def _verify_gemini(self):
+        key = self.gemini_key_var.get()
+        if not key:
+            messagebox.showwarning("入力エラー", "APIキーを入力してください。")
+            return
+            
         def task():
             try:
-                print("Gemini 認証を開始します。ブラウザが開く場合は許可してください...")
-                
-                # /chat exit で認証チェックとログインのみ行う
-                # interactive=True にすることで出力をキャプチャせず、ブラウザ起動などを妨げない
-                run_gemini_cli(["/chat", "exit"], interactive=True)
-                
-                print("Gemini 認証プロセスが完了しました。")
-                self.after(0, lambda: messagebox.showinfo("成功", "Gemini の認証が完了しました。"))
+                print("Gemini APIキーを検証中...")
+                configure_gemini(key)
+                from .gemini_utils import call_gemini_api
+                call_gemini_api("Hello, this is a test message to verify the API key.")
+                print("Gemini APIキーの検証に成功しました！")
+                self.after(0, lambda: messagebox.showinfo("成功", "Gemini APIキーは有効です。"))
             except Exception as e:
-                print(f"Gemini 認証エラー: {e}")
-                self.after(0, lambda err=e: messagebox.showerror("エラー", f"Gemini 認証に失敗しました。\n{err}"))
+                print(f"Gemini 検証エラー: {e}")
+                self.after(0, lambda err=e: messagebox.showerror("エラー", f"APIキーの検証に失敗しました。\n{err}"))
         threading.Thread(target=task).start()
 
     def _save_settings(self):
@@ -449,6 +468,8 @@ YouTubeへのアップロードとフォーム連携には、ご自身でAPIキ�
         
         # Save explicit vars
         self.config_manager.set('workflow', 'use_gemini', bool(self.use_gemini_var.get()))
+        self.config_manager.set('workflow', 'gemini_api_key', self.gemini_key_var.get())
+        self.config_manager.set('workflow', 'gemini_model', self.gemini_model_var.get())
         
         messagebox.showinfo("Settings", "Settings saved successfully.")
 
