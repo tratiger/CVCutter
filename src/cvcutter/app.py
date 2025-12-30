@@ -62,6 +62,8 @@ class ConcertVideoApp(ctk.CTk):
         # UI State
         self.queue_data = []
         self.mapping_results = []
+        self.v_checkboxes = []
+        self.a_checkboxes = []
 
         # Layout
         self.grid_columnconfigure(1, weight=1)
@@ -151,16 +153,16 @@ class ConcertVideoApp(ctk.CTk):
         v_frame = ctk.CTkFrame(sel_frame)
         v_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         ctk.CTkLabel(v_frame, text="ビデオファイル", font=ctk.CTkFont(weight="bold")).pack(pady=5)
-        self.v_list = tk.Listbox(v_frame, bg="#2b2b2b", fg="white", borderwidth=0, highlightthickness=0, selectmode=tk.MULTIPLE)
-        self.v_list.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.v_scroll = ctk.CTkScrollableFrame(v_frame, fg_color="#2b2b2b", height=200)
+        self.v_scroll.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         ctk.CTkButton(v_frame, text="ビデオを追加", command=self._add_videos).pack(pady=5)
 
         # Audio List
         a_frame = ctk.CTkFrame(sel_frame)
         a_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
         ctk.CTkLabel(a_frame, text="マイク音声 (任意)", font=ctk.CTkFont(weight="bold")).pack(pady=5)
-        self.a_list = tk.Listbox(a_frame, bg="#2b2b2b", fg="white", borderwidth=0, highlightthickness=0)
-        self.a_list.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.a_scroll = ctk.CTkScrollableFrame(a_frame, fg_color="#2b2b2b", height=200)
+        self.a_scroll.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         ctk.CTkButton(a_frame, text="音声を追加", command=self._add_audios).pack(pady=5)
 
         # Queue
@@ -423,29 +425,52 @@ Google API の無料枠には、1日あたりのアップロード数に制限�
 
     def _add_videos(self):
         files = filedialog.askopenfilenames(title="Select Video Files")
-        for f in files: self.v_list.insert(tk.END, f)
+        for f in files:
+            var = ctk.BooleanVar(value=False)
+            cb = ctk.CTkCheckBox(self.v_scroll, text=os.path.basename(f), variable=var)
+            cb.pack(anchor="w", padx=5, pady=2)
+            self.v_checkboxes.append({'path': f, 'var': var, 'widget': cb})
 
     def _add_audios(self):
         files = filedialog.askopenfilenames(title="Select Audio Files")
-        for f in files: self.a_list.insert(tk.END, f)
+        for f in files:
+            var = ctk.BooleanVar(value=False)
+            cb = ctk.CTkCheckBox(self.a_scroll, text=os.path.basename(f), variable=var)
+            cb.pack(anchor="w", padx=5, pady=2)
+            self.a_checkboxes.append({'path': f, 'var': var, 'widget': cb})
 
     def _match_and_queue(self):
-        v_sel = self.v_list.curselection()
-        a_sel = self.a_list.curselection()
+        v_paths = [item['path'] for item in self.v_checkboxes if item['var'].get()]
         
-        v_paths = [self.v_list.get(i) for i in v_sel]
-        a_path = self.a_list.get(a_sel[0]) if a_sel else None
+        # Audio selection: logic might need to handle only one audio, but let's take the first checked one
+        a_paths = [item['path'] for item in self.a_checkboxes if item['var'].get()]
+        a_path = a_paths[0] if a_paths else None
 
         if v_paths:
             self.queue_data.append((v_paths, a_path))
             v_names = ", ".join([os.path.basename(p) for p in v_paths])
             self.q_list.insert(tk.END, f"{v_names} + {'Mic Audio' if a_path else 'Video Audio Only'}")
+            
+            # Reset checkboxes after adding to queue
+            for item in self.v_checkboxes:
+                item['var'].set(False)
+            for item in self.a_checkboxes:
+                item['var'].set(False)
         else:
             messagebox.showwarning("Selection", "Please select at least one video.")
 
     def _clear_queue(self):
         self.queue_data = []
         self.q_list.delete(0, tk.END)
+        
+        # Clear checkboxes list and widgets
+        for item in self.v_checkboxes:
+            item['widget'].destroy()
+        self.v_checkboxes = []
+        
+        for item in self.a_checkboxes:
+            item['widget'].destroy()
+        self.a_checkboxes = []
 
     def _browse_file(self, var, key=None):
         f = filedialog.askopenfilename()
