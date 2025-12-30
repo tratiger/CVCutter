@@ -120,6 +120,16 @@ class ConcertVideoApp(ctk.CTk):
 
         sys.stdout = ConsoleRedirector(self.console_text)
         sys.stderr = sys.stdout
+        
+        # Configure logging to use the redirected stdout
+        import logging
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            stream=sys.stdout
+        )
 
     def select_tab(self, name):
         for tab in self.tabs.values():
@@ -314,7 +324,7 @@ YouTubeへのアップロードとフォーム連携には、ご自身でAPIキ�
 【2. ソフトでの設定】
 1. 「設定」タブを開き、「Client Secrets JSON」の「参照」ボタンから、先ほど保存したJSONファイルを選択します。
 2. 「Google ログイン」ボタンを押すとブラウザが開くので、ログインと許可を完了させてください。
-   ※「このアプリは Google で確認されていません」と出た場合は「詳細」>「CVCutter（安全ではないページ）に移動」を押してください。
+   ※「このアプリは Google で確認されていません」と出た場合は かまわず「続行」を押してください。
 
 【3. 基本的な使い方】
 1. 「動画処理」:
@@ -391,7 +401,7 @@ YouTubeへのアップロードとフォーム連携には、ご自身でAPIキ�
                     self.after(0, lambda: messagebox.showinfo("成功", "YouTube アップロードの認証に成功しました。"))
             except Exception as e:
                 print(f"認証エラー ({target}): {e}")
-                self.after(0, lambda: messagebox.showerror("エラー", f"認証に失敗しました: {e}"))
+                self.after(0, lambda err=e: messagebox.showerror("エラー", f"認証に失敗しました: {err}"))
         
         threading.Thread(target=task).start()
 
@@ -408,14 +418,21 @@ YouTubeへのアップロードとフォーム連携には、ご自身でAPIキ�
 
     def _create_form(self):
         title = self.tool_title_var.get()
+        secrets = self.secrets_var.get()
+        if not secrets or not os.path.exists(secrets):
+            messagebox.showerror("エラー", "Client Secrets JSONファイルが見つかりません。設定画面で正しいファイルを指定してください。")
+            return
+
         def task():
             try:
-                service = authenticate_forms_api()
+                service = authenticate_forms_api(client_secrets_path=Path(secrets))
                 info = create_concert_form(service, form_title=title)
                 save_form_config(info)
-                print(f"Form created: {info['response_url']}")
+                print(f"フォームを作成しました: {info['response_url']}")
+                self.after(0, lambda: messagebox.showinfo("成功", f"フォームを作成しました！\n{info['response_url']}"))
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"フォーム作成エラー: {e}")
+                self.after(0, lambda err=e: messagebox.showerror("エラー", f"フォーム作成に失敗しました: {err}"))
         threading.Thread(target=task).start()
 
     def _run_processing(self):

@@ -22,16 +22,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# ログ設定
-log_handlers = []
-if sys.stdout is not None:
-    log_handlers.append(logging.StreamHandler(sys.stdout))
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=log_handlers
-)
+# ログ設定（メインアプリ側で一括設定するため、ここではロガーの取得のみ）
 logger = logging.getLogger(__name__)
 
 # API設定
@@ -99,7 +90,8 @@ def authenticate_forms_api(client_secrets_path: Optional[Path] = None) -> object
         logger.info("認証情報を保存しました")
 
     # Disable discovery cache to avoid errors in frozen environments
-    return build(API_SERVICE_NAME, API_VERSION, credentials=credentials, static_discovery=False, requestBuilder=None)
+    # requestBuilder=None を指定すると環境によって 'NoneType' object is not callable が発生するため削除
+    return build(API_SERVICE_NAME, API_VERSION, credentials=credentials, static_discovery=False)
 
 
 def create_concert_form(
@@ -241,10 +233,6 @@ def create_concert_form(
                                 {
                                     "value": "限定公開（URLを知っている人のみ閲覧可能）",
                                     "isOther": False
-                                },
-                                {
-                                    "value": "非公開（本人のみ閲覧可能）",
-                                    "isOther": False
                                 }
                             ]
                         }
@@ -358,7 +346,7 @@ def main():
     parser.add_argument(
         "--description",
         type=str,
-        default="ご自身の演奏動画をYouTubeにアップロードするための情報を入力してください。",
+        default="演奏動画をYouTubeにアップロードするための情報を入力してください。",
         help="フォームの説明文"
     )
     parser.add_argument(

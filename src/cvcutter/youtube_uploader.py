@@ -34,16 +34,7 @@ LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "youtube_upload.log"
 
-# Configure logging carefully for frozen environments
-log_handlers = [logging.FileHandler(LOG_FILE, encoding='utf-8')]
-if sys.stdout is not None:
-    log_handlers.append(logging.StreamHandler(sys.stdout))
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=log_handlers
-)
+# ログ設定（メインアプリ側で一括設定するため、ここではロガーの取得のみ）
 logger = logging.getLogger(__name__)
 
 # API設定
@@ -232,7 +223,7 @@ def authenticate(client_secrets_path: Optional[Path] = None) -> object:
         logger.info("認証情報を保存しました")
 
     # Disable discovery cache to avoid errors in frozen environments
-    return build(API_SERVICE_NAME, API_VERSION, credentials=credentials, static_discovery=False, requestBuilder=None)
+    return build(API_SERVICE_NAME, API_VERSION, credentials=credentials, static_discovery=False)
 
 
 def get_video_files_sorted_by_time(directory: Path) -> List[Path]:
