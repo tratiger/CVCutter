@@ -19,6 +19,7 @@ from .create_google_form import create_concert_form, authenticate_forms_api, sav
 from .video_mapper import get_video_files_sorted, map_program_to_videos, map_with_form_responses
 from .google_form_connector import FormResponseParser
 from .pdf_parser import parse_concert_pdf
+from .gemini_utils import run_gemini_cli
 
 # --- Console Redirector ---
 class ConsoleRedirector:
@@ -423,24 +424,11 @@ YouTubeへのアップロードとフォーム連携には、ご自身でAPIキ�
     def _gemini_login(self):
         def task():
             try:
-                print("Gemini 認証を開始します...")
-                # 同梱された Node.js と gemini-cli を使用
-                if getattr(sys, 'frozen', False):
-                    base_path = Path(sys._MEIPASS)
-                else:
-                    base_path = Path(__file__).parent.parent.parent
+                print("Gemini 認証を開始します。ブラウザが開く場合は許可してください...")
                 
-                node_exe = base_path / "node-v24.12.0-win-x64" / "node.exe"
-                gemini_js = base_path / "node-v24.12.0-win-x64" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js"
-                
-                if not node_exe.exists():
-                    # EXE実行時のパス解決（実行ファイルと同じ階層にある場合も考慮）
-                    node_exe = Path(sys.executable).parent / "node-v24.12.0-win-x64" / "node.exe"
-                    gemini_js = Path(sys.executable).parent / "node-v24.12.0-win-x64" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js"
-
-                print(f"Using node: {node_exe}")
                 # /chat exit で認証チェックとログインのみ行う
-                subprocess.run([str(node_exe), str(gemini_js), "/chat", "exit"], check=True, capture_output=True, text=True)
+                # interactive=True にすることで出力をキャプチャせず、ブラウザ起動などを妨げない
+                run_gemini_cli(["/chat", "exit"], interactive=True)
                 
                 print("Gemini 認証プロセスが完了しました。")
                 self.after(0, lambda: messagebox.showinfo("成功", "Gemini の認証が完了しました。"))

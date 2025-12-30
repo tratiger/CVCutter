@@ -15,6 +15,7 @@ import subprocess
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
+from .gemini_utils import run_gemini_cli
 
 # ログ設定
 logging.basicConfig(
@@ -58,86 +59,30 @@ GEMINI_PROMPT = """
 """
 
 
-def check_gemini_cli() -> bool:
-    """
-    Gemini CLIがインストールされているか確認
-
-    Returns:
-        True: インストール済み, False: 未インストール
-    """
-    try:
-        result = subprocess.run(
-            ["gemini", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        return result.returncode == 0
-    except FileNotFoundError:
-        return False
-    except Exception as e:
-        logger.warning(f"Gemini CLIの確認中にエラー: {e}")
-        return False
-
-
 def parse_pdf_with_gemini(pdf_path: Path, prompt: str = GEMINI_PROMPT) -> Optional[str]:
     """
     Gemini CLIを使用してPDFを解析
 
     Args:
-        pdf_path: 解析するPDFファイルのパス
-        prompt: Gemini CLIに送るプロンプト
+        pdf_path: 解析する PDF ファイルのパス
+        prompt: Gemini CLI に送るプロンプト
 
     Returns:
-        Gemini CLIの出力（JSON文字列を含む）
+        Gemini CLI の出力（JSON 文字列を含む）
     """
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDFファイルが見つかりません: {pdf_path}")
 
-    # Gemini CLIが利用可能か確認
-    if not check_gemini_cli():
-        raise RuntimeError(
-            "Gemini (AI) の実行環境が見つかりません。\n"
-            "「設定」タブから「Gemini ログイン」を実行して認証を完了させてください。"
-        )
-
     logger.info(f"PDFを解析しています: {pdf_path}")
 
     try:
-        # 同梱された Node.js と gemini-cli を使用
-        if getattr(sys, 'frozen', False):
-            base_path = Path(sys._MEIPASS)
-        else:
-            base_path = Path(__file__).parent.parent.parent
-        
-        node_exe = base_path / "node-v24.12.0-win-x64" / "node.exe"
-        gemini_js = base_path / "node-v24.12.0-win-x64" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js"
-        
-        if not node_exe.exists():
-            node_exe = Path(sys.executable).parent / "node-v24.12.0-win-x64" / "node.exe"
-            gemini_js = Path(sys.executable).parent / "node-v24.12.0-win-x64" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js"
-
-        cmd = [
-            str(node_exe),
-            str(gemini_js),
-            "-p",
-            prompt,
-            "--file",
-            str(pdf_path)
-        ]
-        logger.debug(f"実行コマンド: {' '.join(cmd)}")
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,  # タイムアウト60秒
-            encoding='utf-8'
-        )
+        # 新しい共通ユーティリティを使用
+        args = ["-p", prompt, "--file", str(pdf_path)]
+        result = run_gemini_cli(args, capture_output=True)
 
         if result.returncode != 0:
             logger.error(f"Gemini CLIがエラーを返しました: {result.stderr}")
-            raise RuntimeError(f"Gemini CLI実行エラー: {result.stderr}")
+            raise RuntimeError(f"Gemini CLI実行エラー (Code {result.returncode}): {result.stderr}")
 
         output = result.stdout.strip()
         logger.debug(f"Gemini CLI出力: {output[:200]}...")  # 最初の200文字のみログ

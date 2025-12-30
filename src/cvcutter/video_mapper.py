@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from .gemini_utils import run_gemini_cli
 
 # ログ設定
 logging.basicConfig(
@@ -176,29 +177,11 @@ JSONのみを出力してください。
 """
 
     try:
-        # 同梱された Node.js と gemini-cli を使用
-        if getattr(sys, 'frozen', False):
-            base_path = Path(sys._MEIPASS)
-        else:
-            base_path = Path(__file__).parent.parent.parent
-        
-        node_exe = base_path / "node-v24.12.0-win-x64" / "node.exe"
-        gemini_js = base_path / "node-v24.12.0-win-x64" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js"
-        
-        if not node_exe.exists():
-            node_exe = Path(sys.executable).parent / "node-v24.12.0-win-x64" / "node.exe"
-            gemini_js = Path(sys.executable).parent / "node-v24.12.0-win-x64" / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js"
-
-        result = subprocess.run(
-            [str(node_exe), str(gemini_js), "-p", prompt],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            encoding='utf-8'
-        )
+        # 新しい共通ユーティリティを使用
+        result = run_gemini_cli(["-p", prompt], capture_output=True)
 
         if result.returncode != 0:
-            logger.error(f"Gemini CLIエラー: {result.stderr}")
+            logger.error(f"Gemini CLIエラー (Code {result.returncode}): {result.stderr}")
             return False, 0.0, "エラー"
 
         output = result.stdout.strip()
