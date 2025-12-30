@@ -1,10 +1,24 @@
 import subprocess
 import os
+import sys
 import tempfile
 import shutil
 import imageio_ffmpeg
 from pathlib import Path
 from typing import List
+
+def get_app_data_path(filename: str) -> Path:
+    """
+    EXE実行時と開発環境の両方で、永続化すべきデータファイルの正しいパスを返す
+    """
+    if getattr(sys, 'frozen', False):
+        # EXE本体があるディレクトリ
+        base_path = Path(sys.executable).parent
+    else:
+        # プロジェクトルート
+        base_path = Path(__file__).parent.parent.parent
+    
+    return base_path / filename
 
 def concatenate_videos(video_paths: List[str], output_path: str) -> bool:
     """

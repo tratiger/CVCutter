@@ -22,6 +22,7 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from .video_utils import get_app_data_path
 
 # ログ設定
 logging.basicConfig(
@@ -36,9 +37,9 @@ SCOPES = [
     'https://www.googleapis.com/auth/forms.responses.readonly',
     'https://www.googleapis.com/auth/spreadsheets.readonly'
 ]
-CLIENT_SECRETS_FILE = Path(__file__).parent / "client_secrets.json"
-FORMS_TOKEN_PICKLE = Path(__file__).parent / "forms_token.pickle"
-FORM_CONFIG_FILE = Path(__file__).parent / "form_config.json"
+CLIENT_SECRETS_FILE = get_app_data_path("client_secrets.json")
+FORMS_TOKEN_PICKLE = get_app_data_path("forms_token.pickle")
+FORM_CONFIG_FILE = get_app_data_path("form_config.json")
 
 
 class FormResponseParser:

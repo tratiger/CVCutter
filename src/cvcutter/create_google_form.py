@@ -44,9 +44,11 @@ def get_resource_path(relative_path):
         return Path(sys._MEIPASS) / relative_path
     return Path(__file__).parent.parent.parent / relative_path
 
-CLIENT_SECRETS_FILE = get_resource_path("client_secrets.json")
-TOKEN_PICKLE_FILE = get_resource_path("forms_token.pickle")
-FORM_CONFIG_FILE = get_resource_path("form_config.json")
+from .video_utils import get_app_data_path
+
+CLIENT_SECRETS_FILE = get_app_data_path("client_secrets.json")
+TOKEN_PICKLE_FILE = get_app_data_path("forms_token.pickle")
+FORM_CONFIG_FILE = get_app_data_path("form_config.json")
 
 
 def authenticate_forms_api(client_secrets_path: Optional[Path] = None) -> object:

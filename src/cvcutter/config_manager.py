@@ -1,8 +1,22 @@
 import json
 import os
+import sys
 from pathlib import Path
 
-CONFIG_FILE = "app_config.json"
+def get_app_data_path(filename: str) -> Path:
+    """
+    EXE実行時と開発環境の両方で、永続化すべきデータファイルの正しいパスを返す
+    """
+    if getattr(sys, 'frozen', False):
+        # EXE本体があるディレクトリ
+        base_path = Path(sys.executable).parent
+    else:
+        # プロジェクトルート
+        base_path = Path(__file__).parent.parent.parent
+    
+    return base_path / filename
+
+CONFIG_FILE = get_app_data_path("app_config.json")
 
 DEFAULT_CONFIG = {
     "paths": {

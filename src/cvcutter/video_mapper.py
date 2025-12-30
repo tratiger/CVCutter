@@ -129,172 +129,150 @@ def map_program_to_videos(program_data: Dict, video_info_list: List[Dict]) -> Li
     return mappings
 
 
-def match_with_gemini_cli(
-    program_performer: str,
-    program_piece: str,
-    form_performer: str,
-    form_piece: str
-) -> Tuple[bool, float, str]:
-    """
-    Gemini APIを使って演奏者名と曲名の類似度を判定
-
-    Args:
-        program_performer: パンフレットの演奏者名
-        program_piece: パンフレットの曲名
-        form_performer: アンケートの演奏者名
-        form_piece: アンケートの曲名
-
-    Returns:
-        (マッチするか, 信頼度スコア0-100, 理由)
-    """
-    prompt = f"""
-以下の2つの演奏情報が同一の演奏を指しているか判定してください。
-
-【パンフレット情報】
-演奏者: {program_performer}
-曲名: {program_piece}
-
-【アンケート回答】
-演奏者: {form_performer}
-曲名: {form_piece}
-
-判定基準:
-1. 演奏者名が一致または類似しているか（姓のみ、名のみ、表記揺れを考慮）
-2. 曲名が一致または類似しているか（略称、異なる表記、作品番号の有無を考慮）
-
-以下のJSON形式で回答してください:
-```json
-{{
-  "is_match": true または false,
-  "confidence_score": 0-100の数値,
-  "reason": "判定理由の説明"
-}}
-```
-
-JSONのみを出力してください。
-"""
-
-    try:
-        # APIキーの取得と設定
-        config = ConfigManager().config
-        api_key = config['workflow'].get('gemini_api_key')
-        if not api_key:
-            raise ValueError("Gemini APIキーが設定されていません。設定画面から入力してください。")
-        
-        configure_gemini(api_key)
-        
-        # 設定からモデル名を取得
-        model_name = config['workflow'].get('gemini_model', 'gemini-2.5-flash')
-        
-        # API呼び出し
-        output = call_gemini_api(prompt, model_name=model_name)
-
-        # JSON抽出
-        result_data = extract_json_from_text(output)
-
-        is_match = result_data.get("is_match", False)
-        confidence = float(result_data.get("confidence_score", 0))
-        reason = result_data.get("reason", "")
-
-        return is_match, confidence, reason
-
-    except Exception as e:
-        logger.error(f"マッチング判定エラー: {e}")
-        return False, 0.0, f"エラー: {e}"
-
-
 def map_with_form_responses(
     program_video_mappings: List[Dict],
     form_responses: List[Dict],
     use_gemini: bool = True
 ) -> List[Dict]:
     """
-    プログラム+動画情報とアンケート回答を紐付け
-
-    Args:
-        program_video_mappings: プログラム→動画の紐付け結果
-        form_responses: アンケート回答リスト
-        use_gemini: Gemini CLIで類似度判定を行うか
-
-    Returns:
-        最終的なマッピング結果（アンケート回答があるもののみ）
+    プログラム+動画情報とアンケート回答を紐付け（一括AIマッピング対応）
     """
-    final_mappings = []
+    if not use_gemini:
+        # Geminiを使わない場合の簡易マッチング（フォールバック）
+        return _map_simple(program_video_mappings, form_responses)
 
     logger.info("\n" + "=" * 60)
-    logger.info("アンケート回答との紐付けを開始します")
+    logger.info("アンケート回答との一括AI紐付けを開始します")
     logger.info("=" * 60)
 
-    # アンケート回答でループ
+    # 有効なプログラム情報のリストを作成
+    program_list = []
+    for m in program_video_mappings:
+        if m.get("program_data") and m.get("video_data"):
+            program_list.append({
+                "mapping_order": m["mapping_order"],
+                "performer_name": m.get("performer_name", ""),
+                "piece_title": m.get("piece_title", ""),
+                "video_name": m.get("video_name", "")
+            })
+
+    if not program_list or not form_responses:
+        logger.warning("マッピング対象のデータが不足しています")
+        return []
+
+    prompt = f"""
+あなたはピアノコンサートの運営スタッフです。
+「プログラム情報」と「演奏者からのアンケート回答」を照合し、どのアンケート回答がどのプログラム（動画）に対応するかを紐付けてください。
+
+【プログラム情報（動画紐付け済み）】
+{json.dumps(program_list, ensure_ascii=False, indent=2)}
+
+【アンケート回答】
+{json.dumps(form_responses, ensure_ascii=False, indent=2)}
+
+【紐付けルール】
+1. 演奏者名 (performer_name vs name):
+   - 姓名の順序、スペースの有無、常用漢字と旧字体の違いなどを考慮してください。
+   - 名字のみ、あるいは名前のみの記載でも、他と重複がなければ同一人物とみなしてください。
+2. 曲名 (piece_title):
+   - 略称、通称、日本語/外国語表記の違いを考慮してください。
+   - 作品番号 (Op., BWV等) や楽章番号が一部欠落していても、演奏者が一致すれば同一曲とみなしてください。
+3. 全体最適化:
+   - 1つのアンケート回答が複数のプログラムにマッチしそうな場合は、全体のバランスを見て最も自然な組み合わせを決定してください。
+   - アンケート回答者がプログラムに存在しない場合は、mapping_order を null にしてください。
+
+【出力形式】
+必ず以下のJSON構造のみを返してください。
+
+```json
+{{
+  "mappings": [
+    {{
+      "response_id": アンケートのID,
+      "mapping_order": マッチしたプログラムの mapping_order (数値、見つからない場合は null),
+      "confidence_score": 0-100の信頼度,
+      "reason": "紐付けた理由（例：氏名が完全一致、曲名が「月光」で共通など）"
+    }}
+  ]
+}}
+```
+"""
+
+    try:
+        config = ConfigManager().config
+        api_key = config['workflow'].get('gemini_api_key')
+        if not api_key:
+            raise ValueError("Gemini APIキーが設定されていません。")
+        
+        configure_gemini(api_key)
+        model_name = config['workflow'].get('gemini_model', 'gemini-2.5-flash')
+        
+        output = call_gemini_api(prompt, model_name=model_name)
+        result_data = extract_json_from_text(output)
+        
+        mapping_dict = {m["response_id"]: m for m in result_data.get("mappings", [])}
+        
+        # 紐付け結果の整理
+        # アンケート回答があったものだけを抽出する方針
+        mapping_dict = {m["response_id"]: m for m in result_data.get("mappings", [])}
+        
+        final_mappings = []
+        for form_resp in form_responses:
+            res_id = form_resp["response_id"]
+            m_info = mapping_dict.get(res_id)
+            
+            if m_info and m_info["mapping_order"] is not None:
+                target_order = m_info["mapping_order"]
+                # mapping_order から元のマッピング情報を探す
+                best_match = next((m for m in program_video_mappings if m["mapping_order"] == target_order), None)
+                
+                if best_match:
+                    final_mapping = {
+                        **best_match,
+                        "form_response": form_resp,
+                        "confidence_score": m_info["confidence_score"],
+                        "match_reason": m_info["reason"],
+                        "matched": True
+                    }
+                    final_mappings.append(final_mapping)
+                    logger.info(f"✓ アンケート {res_id} -> プログラム {target_order} (信頼度: {m_info['confidence_score']}%)")
+                else:
+                    logger.warning(f"？ アンケート {res_id} が指定したプログラム番号 {target_order} が見つかりません")
+            else:
+                logger.warning(f"✗ アンケート {res_id} ({form_resp.get('name')}) にマッチするプログラムが見つかりませんでした")
+
+        return final_mappings
+
+    except Exception as e:
+        logger.error(f"一括マッピングエラー: {e}")
+        return _map_simple(program_video_mappings, form_responses)
+
+def _map_simple(program_video_mappings, form_responses):
+    """
+    簡易的な文字列一致によるマッピング（フォールバック用）
+    """
+    final_mappings = []
     for form_resp in form_responses:
         form_name = form_resp.get("name", "")
         form_piece = form_resp.get("piece_title", "")
-
-        logger.info(f"\n【アンケート回答 {form_resp['response_id']}】")
-        logger.info(f"演奏者: {form_name}, 曲名: {form_piece}")
-
-        best_match = None
-        best_score = 0.0
-        best_reason = ""
-
-        # プログラム+動画情報と照合
+        
         for mapping in program_video_mappings:
             if not mapping.get("program_data") or not mapping.get("video_data"):
                 continue
-
-            program_name = mapping.get("performer_name", "")
-            program_piece = mapping.get("piece_title", "")
-
-            if use_gemini:
-                # Gemini CLIで類似度判定
-                is_match, confidence, reason = match_with_gemini_cli(
-                    program_name, program_piece,
-                    form_name, form_piece
-                )
-
-                logger.info(
-                    f"  vs プログラム {mapping['mapping_order']} "
-                    f"({program_name} / {program_piece}): "
-                    f"{'✓' if is_match else '✗'} 信頼度 {confidence:.0f}% - {reason}"
-                )
-
-                if is_match and confidence > best_score:
-                    best_match = mapping
-                    best_score = confidence
-                    best_reason = reason
-
-            else:
-                # 簡易的な文字列マッチング（Gemini未使用時）
-                name_match = form_name in program_name or program_name in form_name
-                piece_match = form_piece in program_piece or program_piece in form_piece
-
-                if name_match and piece_match:
-                    confidence = 80.0
-                    best_match = mapping
-                    best_score = confidence
-                    best_reason = "文字列部分一致"
-                    break
-
-        if best_match:
-            # マッチング成功
-            final_mapping = {
-                **best_match,
-                "form_response": form_resp,
-                "confidence_score": best_score,
-                "match_reason": best_reason,
-                "matched": True
-            }
-            final_mappings.append(final_mapping)
-
-            logger.info(f"  → ✓ マッチング成功 (信頼度: {best_score:.0f}%)")
-        else:
-            # マッチング失敗
-            logger.warning(f"  → ✗ マッチするプログラムが見つかりませんでした")
-
-    logger.info("\n" + "=" * 60)
-    logger.info(f"マッチング完了: {len(final_mappings)}/{len(form_responses)}件")
-    logger.info("=" * 60)
-
+            
+            p_name = mapping.get("performer_name", "")
+            p_piece = mapping.get("piece_title", "")
+            
+            if (form_name in p_name or p_name in form_name) and \
+               (form_piece[:5] in p_piece or p_piece[:5] in form_piece):
+                final_mappings.append({
+                    **mapping,
+                    "form_response": form_resp,
+                    "confidence_score": 70.0,
+                    "match_reason": "簡易一致",
+                    "matched": True
+                })
+                break
     return final_mappings
 
 
