@@ -277,7 +277,9 @@ class ConcertVideoApp(ctk.CTk):
             ("ビデオ音量 (0-1)", "processing", "video_audio_volume"),
             ("マイク音量 (>1)", "processing", "mic_audio_volume"),
             ("最小演奏時間 (秒)", "processing", "min_duration_seconds"),
-            ("GPUアクセラレーション", "processing", "use_gpu", "bool")
+            ("GPUアクセラレーション (YOLO)", "processing", "use_gpu", "bool"),
+            ("上手ゾーンの幅 (%)", "processing", "left_zone_end_percent"),
+            ("中央ゾーンの幅 (%)", "processing", "center_zone_width_percent")
         ])
 
         # Gemini AI Auth
