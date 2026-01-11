@@ -240,10 +240,17 @@ def run_full_workflow(
                 # youtube_uploader.pyはvideo_dirから動画を取得するので、
                 # 動画ファイルが正しくソートされていることを前提とする
 
-                summary = batch_upload(
+                # batch_uploadが更新されたメタデータを返すように変更
+                updated_metadata, summary = batch_upload(
                     video_dir=video_dir,
                     metadata_file=upload_metadata_json
                 )
+                
+                # 更新されたメタデータ（URL含む）をファイルに保存
+                with open(upload_metadata_json, 'w', encoding='utf-8') as f:
+                    json.dump(updated_metadata, f, ensure_ascii=False, indent=2)
+                logger.info(f"✓ URL情報を含む最終メタデータを保存: {upload_metadata_json}")
+
 
                 logger.info("\n" + "=" * 80)
                 logger.info("YouTubeアップロード完了")

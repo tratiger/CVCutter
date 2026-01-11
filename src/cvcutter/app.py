@@ -9,12 +9,13 @@ import queue
 import time
 from pathlib import Path
 import json
+from datetime import datetime
 
 # Logic imports
 from .config_manager import ConfigManager
 from . import video_processor
 from .run_youtube_workflow import run_full_workflow
-from .create_google_form import create_concert_form, authenticate_forms_api, save_form_config
+from .create_google_form import create_concert_form, authenticate_forms_api, save_form_config, load_form_history
 from .video_mapper import get_video_files_sorted, map_program_to_videos, map_with_form_responses
 from .google_form_connector import FormResponseParser
 from .pdf_parser import parse_concert_pdf
@@ -77,20 +78,20 @@ class ConcertVideoApp(ctk.CTk):
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="CVCutter", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
+        self.btn_form = ctk.CTkButton(self.sidebar_frame, text="0. フォーム生成", command=lambda: self.select_tab("form"))
+        self.btn_form.grid(row=1, column=0, padx=20, pady=10)
+
         self.btn_process = ctk.CTkButton(self.sidebar_frame, text="1. 動画処理", command=lambda: self.select_tab("process"))
-        self.btn_process.grid(row=1, column=0, padx=20, pady=10)
+        self.btn_process.grid(row=2, column=0, padx=20, pady=10)
 
         self.btn_preview = ctk.CTkButton(self.sidebar_frame, text="2. プレビュー & 紐付け", command=lambda: self.select_tab("preview"))
-        self.btn_preview.grid(row=2, column=0, padx=20, pady=10)
+        self.btn_preview.grid(row=3, column=0, padx=20, pady=10)
 
         self.btn_upload = ctk.CTkButton(self.sidebar_frame, text="3. アップロード", command=lambda: self.select_tab("upload"))
-        self.btn_upload.grid(row=3, column=0, padx=20, pady=10)
+        self.btn_upload.grid(row=4, column=0, padx=20, pady=10)
 
         self.btn_settings = ctk.CTkButton(self.sidebar_frame, text="設定", command=lambda: self.select_tab("settings"))
-        self.btn_settings.grid(row=4, column=0, padx=20, pady=10)
-
-        self.btn_tools = ctk.CTkButton(self.sidebar_frame, text="ツール", command=lambda: self.select_tab("tools"))
-        self.btn_tools.grid(row=5, column=0, padx=20, pady=10)
+        self.btn_settings.grid(row=5, column=0, padx=20, pady=10)
 
         self.btn_help = ctk.CTkButton(self.sidebar_frame, text="ヘルプ", command=lambda: self.select_tab("help"))
         self.btn_help.grid(row=6, column=0, padx=20, pady=10)
@@ -102,14 +103,14 @@ class ConcertVideoApp(ctk.CTk):
         self.main_frame.grid_rowconfigure(0, weight=1)
 
         self.tabs = {}
+        self._build_form_tab()
         self._build_processing_tab()
         self._build_preview_tab()
         self._build_upload_tab()
         self._build_settings_tab()
-        self._build_tools_tab()
         self._build_help_tab()
 
-        self.select_tab("process")
+        self.select_tab("form")
 
         # Console (Bottom)
         self.console_frame = ctk.CTkFrame(self, height=150)
@@ -224,8 +225,19 @@ class ConcertVideoApp(ctk.CTk):
         self.upload_btn = ctk.CTkButton(tab, text="アップロード ワークフローを開始", height=60, command=self._run_workflow)
         self.upload_btn.pack(pady=20, padx=50, fill=tk.X)
 
-        self.upload_result_area = ctk.CTkScrollableFrame(tab, label_text="アップロード結果", height=300)
-        self.upload_result_area.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
+        result_frame = ctk.CTkFrame(tab)
+        result_frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
+        result_frame.grid_columnconfigure(0, weight=1)
+        result_frame.grid_rowconfigure(1, weight=1)
+        
+        btn_frame = ctk.CTkFrame(result_frame, fg_color="transparent")
+        btn_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+        
+        ctk.CTkButton(btn_frame, text="結果をクリップボードにコピー", command=self._copy_results_to_clipboard).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(btn_frame, text="結果をファイルに保存", command=self._export_results_to_file).pack(side=tk.LEFT, padx=5)
+
+        self.upload_result_area = ctk.CTkScrollableFrame(result_frame, label_text="アップロード結果")
+        self.upload_result_area.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
 
     def _build_settings_tab(self):
         tab = ctk.CTkScrollableFrame(self.main_frame, label_text="システム設定")
@@ -323,17 +335,29 @@ class ConcertVideoApp(ctk.CTk):
             
             self.setting_vars[(section, key)] = var
 
-    def _build_tools_tab(self):
+    def _build_form_tab(self):
         tab = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.tabs["tools"] = tab
+        self.tabs["form"] = tab
+        tab.grid_columnconfigure(0, weight=1)
+
+        # フォーム作成フレーム
+        create_frame = ctk.CTkFrame(tab)
+        create_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=20)
+        create_frame.grid_columnconfigure(0, weight=1)
         
-        f_frame = ctk.CTkFrame(tab)
-        f_frame.pack(fill=tk.X, padx=20, pady=20)
-        ctk.CTkLabel(f_frame, text="Google フォーム自動生成", font=ctk.CTkFont(weight="bold")).pack(pady=10)
+        ctk.CTkLabel(create_frame, text="Google フォーム自動生成", font=ctk.CTkFont(weight="bold")).pack(pady=10)
         
         self.tool_title_var = ctk.StringVar(value="コンサート出演者情報入力フォーム")
-        ctk.CTkEntry(f_frame, textvariable=self.tool_title_var, placeholder_text="フォームのタイトル", width=400).pack(pady=5)
-        ctk.CTkButton(f_frame, text="新しいフォームを作成", command=self._create_form).pack(pady=10)
+        ctk.CTkEntry(create_frame, textvariable=self.tool_title_var, placeholder_text="フォームのタイトル", width=400).pack(pady=5, padx=20, fill="x")
+        ctk.CTkButton(create_frame, text="新しいフォームを作成", command=self._create_form).pack(pady=10)
+
+        # フォーム履歴フレーム
+        history_frame = ctk.CTkScrollableFrame(tab, label_text="作成済みフォーム履歴")
+        history_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
+        tab.grid_rowconfigure(1, weight=1)
+
+        self.form_history_frame = history_frame
+        self._update_form_history()
 
     def _build_help_tab(self):
         tab = ctk.CTkScrollableFrame(self.main_frame, label_text="ヘルプ & 使い方")
@@ -561,6 +585,7 @@ Google API の無料枠には、1日あたりのアップロード数に制限�
                 save_form_config(info)
                 print(f"フォームを作成しました: {info['response_url']}")
                 self.after(0, lambda: messagebox.showinfo("成功", f"フォームを作成しました！\n{info['response_url']}"))
+                self.after(0, self._update_form_history)
             except Exception as e:
                 print(f"フォーム作成エラー: {e}")
                 self.after(0, lambda err=e: messagebox.showerror("エラー", f"フォーム作成に失敗しました: {err}"))
@@ -656,6 +681,9 @@ Google API の無料枠には、1日あたりのアップロード数に制限�
             ctk.CTkLabel(frame, text=f"動画ファイル: {video}").grid(row=1, column=0, padx=10, sticky="w")
             ctk.CTkLabel(frame, text=f"公開設定: {m['form_response'].get('privacy', 'unlisted')}").grid(row=1, column=1, padx=10, sticky="w")
 
+            edit_btn = ctk.CTkButton(frame, text="編集", width=60, command=lambda m=m: self._edit_mapping(m))
+            edit_btn.grid(row=0, column=2, rowspan=2, padx=10)
+
     def _run_workflow(self):
         pdf = self.pdf_var.get()
         if not pdf:
@@ -691,11 +719,159 @@ Google API の無料枠には、1日あたりのアップロード数に制限�
                     data = json.load(f)
                     for i, v in enumerate(data.get('videos', [])):
                         frame = ctk.CTkFrame(self.upload_result_area)
-                        frame.pack(fill=tk.X, padx=5, pady=2)
-                        ctk.CTkLabel(frame, text=f"{i+1}. {v['title']}", font=ctk.CTkFont(weight="bold")).pack(side=tk.LEFT, padx=10)
-                        ctk.CTkLabel(frame, text=f"状態: {v.get('privacy_status', '不明')}", text_color="gray").pack(side=tk.RIGHT, padx=10)
+                        frame.pack(fill=tk.X, padx=5, pady=5)
+                        frame.grid_columnconfigure(0, weight=1)
+                        
+                        title_text = f"{i+1}. {v['title']}"
+                        status_text = f"状態: {v.get('privacy_status', '不明')}"
+                        url_text = f"URL: {v.get('video_url', 'アップロードされていません')}"
+
+                        ctk.CTkLabel(frame, text=title_text, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=10)
+                        ctk.CTkLabel(frame, text=status_text, text_color="gray").grid(row=0, column=1, sticky="e", padx=10)
+                        ctk.CTkLabel(frame, text=url_text, justify=tk.LEFT).grid(row=1, column=0, columnspan=2, sticky="w", padx=10)
+
             except Exception as e:
                 print(f"結果表示エラー: {e}")
+
+    def _get_results_as_text(self) -> str:
+        """Helper to format upload results as a string."""
+        results_text = []
+        metadata_path = Path(self.config['paths']['output_dir']) / "upload_metadata.json"
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for i, v in enumerate(data.get('videos', [])):
+                        results_text.append(f"[{i+1}] {v['title']}")
+                        results_text.append(f"  状態: {v.get('privacy_status', '不明')}")
+                        results_text.append(f"  URL: {v.get('video_url', 'N/A')}")
+                        results_text.append("-" * 20)
+                return "\n".join(results_text)
+            except Exception as e:
+                return f"結果の取得中にエラーが発生しました: {e}"
+        return "結果ファイルが見つかりません。"
+
+    def _copy_results_to_clipboard(self):
+        """Copy upload results to the clipboard."""
+        results_str = self._get_results_as_text()
+        self.clipboard_clear()
+        self.clipboard_append(results_str)
+        messagebox.showinfo("コピー完了", "アップロード結果をクリップボードにコピーしました。")
+
+    def _export_results_to_file(self):
+        """Export upload results to a text file."""
+        results_str = self._get_results_as_text()
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            title="結果を保存"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(results_str)
+                messagebox.showinfo("保存完了", f"結果を {os.path.basename(file_path)} に保存しました。")
+            except Exception as e:
+                messagebox.showerror("保存エラー", f"ファイルの保存中にエラーが発生しました:\n{e}")
+
+    def _edit_mapping(self, mapping_item):
+        """Open a toplevel window to edit a single mapping."""
+        
+        edit_window = ctk.CTkToplevel(self)
+        edit_window.title("マッピング編集")
+        edit_window.geometry("600x300")
+        edit_window.transient(self) # Keep on top
+        edit_window.grab_set() # Modal
+
+        # Get all available video files from output dir
+        output_dir = Path(self.config['paths']['output_dir'])
+        available_videos = get_video_files_sorted(output_dir)
+        video_filenames = [os.path.basename(v['file_path']) for v in available_videos]
+
+        # Current info
+        title = mapping_item['form_response'].get('piece_title', 'Unknown')
+        name = mapping_item['form_response'].get('name', 'Unknown')
+        current_video = os.path.basename(mapping_item['video_file']) if mapping_item['video_file'] else "N/A"
+
+        ctk.CTkLabel(edit_window, text=f"プログラム: {title} - {name}", font=ctk.CTkFont(weight="bold")).pack(pady=10)
+        
+        ctk.CTkLabel(edit_window, text="紐付ける動画ファイルを選択してください:").pack(pady=(10, 0))
+        
+        new_video_var = ctk.StringVar(value=current_video)
+        video_menu = ctk.CTkOptionMenu(edit_window, variable=new_video_var, values=video_filenames, width=400)
+        video_menu.pack(pady=10)
+
+        def save_and_close():
+            selected_filename = new_video_var.get()
+            selected_video_info = next((v for v in available_videos if os.path.basename(v['file_path']) == selected_filename), None)
+            
+            if selected_video_info:
+                self._save_manual_mapping(mapping_item, selected_video_info)
+                edit_window.destroy()
+            else:
+                messagebox.showerror("エラー", "選択された動画情報が見つかりません。", parent=edit_window)
+
+
+        save_btn = ctk.CTkButton(edit_window, text="保存して閉じる", command=save_and_close)
+        save_btn.pack(pady=20)
+
+    def _save_manual_mapping(self, mapping_item, new_video_info):
+        """Update the mapping_results with the user's manual selection."""
+        
+        # Find the item in the main list
+        for i, item in enumerate(self.mapping_results):
+            # Compare by a unique identifier, e.g., form_response response_id
+            if item['form_response']['response_id'] == mapping_item['form_response']['response_id']:
+                print(f"Updating mapping for '{item['form_response']['piece_title']}'")
+                print(f"  Old video: {item['video_file']}")
+                print(f"  New video: {new_video_info['file_path']}")
+                
+                # Update the video-related fields
+                self.mapping_results[i]['video_file'] = new_video_info['file_path']
+                self.mapping_results[i]['video_name'] = new_video_info['file_name']
+                self.mapping_results[i]['video_data'] = new_video_info
+                break
+        
+        # Refresh the UI to show the change
+        self._update_preview_ui()
+
+    def _update_form_history(self):
+        # 既存のウィジェットをクリア
+        for widget in self.form_history_frame.winfo_children():
+            widget.destroy()
+
+        try:
+            history = load_form_history() # 最新3件が返される想定
+
+            if not history:
+                ctk.CTkLabel(self.form_history_frame, text="作成履歴はありません。").pack(pady=10)
+                return
+
+            for item in history:
+                item_frame = ctk.CTkFrame(self.form_history_frame)
+                item_frame.pack(fill="x", padx=10, pady=5)
+                
+                title = item.get("form_title", "無題のフォーム")
+                form_id = item.get("form_id", "ID不明")
+                created_at = item.get("created_at", "")
+                
+                created_str = "日時不明"
+                if created_at:
+                    try:
+                        # ISO 8601形式の文字列をdatetimeオブジェクトに変換
+                        dt_obj = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        # ローカルタイムゾーンに変換して表示
+                        created_str = dt_obj.astimezone().strftime('%Y-%m-%d %H:%M')
+                    except (ValueError, TypeError):
+                        created_str = created_at
+
+                label_text = f"タイトル: {title}\nID: {form_id}\n作成日時: {created_str}"
+                ctk.CTkLabel(item_frame, text=label_text, justify=tk.LEFT).pack(anchor="w", padx=10, pady=5)
+        except Exception as e:
+            print(f"フォーム履歴の読み込みに失敗しました: {e}")
+            ctk.CTkLabel(self.form_history_frame, text=f"履歴の読み込みに失敗しました:\n{e}", text_color="red").pack(pady=10)
 
 def main():
     app = ConcertVideoApp()

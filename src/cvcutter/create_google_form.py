@@ -15,7 +15,8 @@ import json
 import pickle
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from datetime import datetime, timezone
 
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -49,6 +50,7 @@ from .video_utils import get_app_data_path
 CLIENT_SECRETS_FILE = get_app_data_path("client_secrets.json")
 TOKEN_PICKLE_FILE = get_app_data_path("forms_token.pickle")
 FORM_CONFIG_FILE = get_app_data_path("form_config.json")
+FORM_HISTORY_FILE = get_app_data_path("form_history.json")
 
 
 def authenticate_forms_api(client_secrets_path: Optional[Path] = None) -> object:
@@ -286,7 +288,7 @@ def create_concert_form(
         "form_title": form_title,
         "edit_url": form_url,
         "response_url": response_url,
-        "created_at": result.get("responderUri", "")
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
 
     return form_info
@@ -294,21 +296,74 @@ def create_concert_form(
 
 def save_form_config(form_info: Dict, config_file: Path = FORM_CONFIG_FILE):
     """
-    フォーム情報を設定ファイルに保存
+    フォーム情報を設定ファイルに保存し、履歴にも追加
 
     Args:
         form_info: フォーム情報
         config_file: 設定ファイルのパス
     """
+    # 1. 従来の単一ファイルに保存（後方互換性のため）
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(form_info, f, ensure_ascii=False, indent=2)
-
-        logger.info(f"\n✓ フォーム情報を保存しました: {config_file}")
+        logger.info(f"✓ 最新のフォーム情報を保存しました: {config_file}")
+    except Exception as e:
+        logger.error(f"最新フォーム設定ファイルの保存に失敗: {e}")
+        # 履歴の保存は試みる
+    
+    # 2. 履歴ファイルに追記
+    try:
+        history = []
+        if FORM_HISTORY_FILE.exists():
+            with open(FORM_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        
+        # 既存の履歴に同じIDがあれば更新、なければ追加
+        found = False
+        for i, item in enumerate(history):
+            if item.get("form_id") == form_info.get("form_id"):
+                history[i] = form_info
+                found = True
+                break
+        if not found:
+            history.append(form_info)
+            
+        # created_at で降順ソート
+        history.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        with open(FORM_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+        logger.info(f"✓ フォーム履歴を更新しました: {FORM_HISTORY_FILE}")
 
     except Exception as e:
-        logger.error(f"設定ファイルの保存に失敗: {e}")
-        raise
+        logger.error(f"フォーム履歴ファイルの保存に失敗: {e}")
+        # このエラーは致命的ではないので、例外は送出しない
+
+
+def load_form_history(history_file: Path = FORM_HISTORY_FILE) -> List[Dict]:
+    """
+    フォーム作成履歴を読み込む
+
+    Args:
+        history_file: 履歴ファイルのパス
+
+    Returns:
+        フォーム情報のリスト（最新3件）
+    """
+    if not history_file.exists():
+        return []
+    
+    try:
+        with open(history_file, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+        
+        # created_at で降順ソートされているはずだが、念のためソート
+        history.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        return history[:3] # 最新3件を返す
+    except Exception as e:
+        logger.error(f"フォーム履歴の読み込みに失敗: {e}")
+        return []
 
 
 def load_form_config(config_file: Path = FORM_CONFIG_FILE) -> Optional[Dict]:

@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+import json
 from .gemini_utils import call_gemini_api, extract_json_from_text, configure_gemini
 from .config_manager import ConfigManager
 

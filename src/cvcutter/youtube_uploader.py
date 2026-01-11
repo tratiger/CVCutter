@@ -369,6 +369,10 @@ def upload_video(youtube, video_file: Path, metadata: Dict,
 
         video_id = response.get("id")
         logger.info(f"✓ アップロード成功: {video_file.name} (ID: {video_id})")
+        
+        # メタデータにvideo_idとURLを追加
+        metadata['video_id'] = video_id
+        metadata['video_url'] = f"https://www.youtube.com/watch?v={video_id}"
 
         # 再生リストに追加（指定されている場合）
         playlist_id = metadata.get("playlist_id")
@@ -428,7 +432,7 @@ def add_video_to_playlist(youtube, video_id: str, playlist_id: str):
 
 
 def batch_upload(video_dir: Path, metadata_file: Path,
-                 confirm_callback=None) -> Dict:
+                 confirm_callback=None) -> Tuple[Dict, Dict]:
     """
     複数の動画をバッチアップロード
 
@@ -438,7 +442,7 @@ def batch_upload(video_dir: Path, metadata_file: Path,
         confirm_callback: ユーザー確認用コールバック関数 (video_files, metadata) -> bool
 
     Returns:
-        アップロード結果のサマリー
+        (更新されたメタデータ, アップロード結果のサマリー)
     """
     logger.info("=" * 60)
     logger.info("YouTube 動画バッチアップロード開始")
@@ -456,7 +460,7 @@ def batch_upload(video_dir: Path, metadata_file: Path,
 
     if not video_files:
         logger.warning("アップロードする動画ファイルが見つかりません")
-        return quota_manager.get_upload_summary()
+        return metadata, quota_manager.get_upload_summary()
 
     # メタデータの読み込み
     logger.info(f"メタデータを読み込んでいます: {metadata_file}")
@@ -471,7 +475,7 @@ def batch_upload(video_dir: Path, metadata_file: Path,
         if confirm_callback:
             if not confirm_callback(video_files, metadata, error_msg):
                 logger.info("ユーザーによりアップロードがキャンセルされました")
-                return quota_manager.get_upload_summary()
+                return metadata, quota_manager.get_upload_summary()
         else:
             raise ValueError(error_msg)
 
@@ -479,7 +483,7 @@ def batch_upload(video_dir: Path, metadata_file: Path,
     if confirm_callback:
         if not confirm_callback(video_files, metadata, None):
             logger.info("ユーザーによりアップロードがキャンセルされました")
-            return quota_manager.get_upload_summary()
+            return metadata, quota_manager.get_upload_summary()
 
     # バッチアップロード実行
     video_metadata_list = metadata.get("videos", [])
@@ -494,6 +498,7 @@ def batch_upload(video_dir: Path, metadata_file: Path,
 
         # アップロード実行
         try:
+            # upload_videoがvideo_metadataを更新する
             video_id = upload_video(youtube, video_file, video_metadata)
             quota_manager.add_upload_history(
                 str(video_file), video_id, "success"
@@ -521,7 +526,7 @@ def batch_upload(video_dir: Path, metadata_file: Path,
     logger.info(f"本日のアップロード数: {summary['uploads_today']}/{MAX_UPLOADS_PER_DAY}")
     logger.info(f"次回クォータリセット: {summary['quota_reset_time']}")
 
-    return summary
+    return metadata, summary
 
 
 def main():
@@ -547,7 +552,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        summary = batch_upload(args.video_dir, args.metadata)
+        _, summary = batch_upload(args.video_dir, args.metadata)
 
         if summary['failed'] > 0:
             sys.exit(1)
