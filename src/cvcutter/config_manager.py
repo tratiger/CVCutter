@@ -32,9 +32,10 @@ DEFAULT_CONFIG = {
         "video_audio_volume": 0.6,
         "mic_audio_volume": 1.5,
         "audio_sync_sample_rate": 22050,
-        "mog2_threshold": 40,
-        "min_contour_area": 3000,
-        "min_duration_seconds": 30
+        "min_duration_seconds": 30,
+        "use_gpu": True,
+        "left_zone_end_percent": 0.15,
+        "center_zone_width_percent": 0.70
     },
     "workflow": {
         "use_forms_api": True,
