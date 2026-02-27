@@ -9,7 +9,7 @@ try:
     from moviepy.editor import VideoFileClip, AudioFileClip
 except ImportError:
     from moviepy import VideoFileClip, AudioFileClip
-from .detect_performances import detect_performances_by_motion
+from .detect_performances import detect_performances
 from .sync_audio import find_audio_offset
 from tqdm import tqdm
 import time
@@ -129,9 +129,13 @@ def process_pair(video_paths, audio_path, config_overrides, progress_callback=No
         'mic_audio_volume': 1.5,
         'audio_sync_sample_rate': 22050,
         'use_gpu': True,
-        'detection_config': { 'max_seconds_to_process': None, 'min_duration_seconds': 30, 'show_video': False,
-                              'mog2_threshold': 40, 'min_contour_area': 3000, 'left_zone_end_percent': 0.15,
-                              'center_zone_end_percent': 0.65 } # 誤検知減少のためここを変更すべし
+        'detection_config': {
+            'max_seconds_to_process': None,
+            'min_duration_seconds': 30,
+            'show_video': False,
+            'left_zone_end_percent': 0.15,
+            'yolo_model': 'yolov8n.pt'
+        }
     }
     config.update(config_overrides)
 
@@ -140,7 +144,7 @@ def process_pair(video_paths, audio_path, config_overrides, progress_callback=No
 
     # --- Step 1: Detect Segments ---
     update_status(f"Detecting segments for {os.path.basename(video_path)}...")
-    performance_segments = detect_performances_by_motion(config['video_path'], config['detection_config'])
+    performance_segments = detect_performances(config['video_path'], config['detection_config'])
     if not performance_segments:
         print("\nNo performance segments found. Skipping to next pair.")
         return
