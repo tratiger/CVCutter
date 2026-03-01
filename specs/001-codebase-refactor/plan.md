@@ -5,13 +5,13 @@
 
 ## Summary
 
-Full architecture refactor of CVCutter — a concert video splitting, audio synchronization, metadata mapping, and YouTube upload orchestration desktop tool. The refactor introduces strict four-layer architecture (Presentation → Application → Domain → Infrastructure), migrates the UI from customtkinter to Flet, adds multimodal performance-segment detection (YOLO visual + audio energy + audio content classification), integrates local Whisper speech transcription for metadata mapping, implements checkpoint/resume with structured logging, enforces test-first development with ≥80% overall / ≥90% domain coverage, and packages everything into a standalone Windows installer with bundled local models (<2 GB total).
+Full architecture refactor of CVCutter — a concert video splitting, audio synchronization, metadata mapping, and YouTube upload orchestration desktop tool. The refactor introduces strict four-layer architecture with inward dependencies (Presentation/Application orchestrate Domain via Infrastructure adapters implementing domain ports), migrates the UI from customtkinter to Flet, adds multimodal performance-segment detection (YOLO visual + audio energy + audio content classification), integrates local Whisper speech transcription for metadata mapping, implements checkpoint/resume with structured logging, enforces test-first development with ≥80% overall / ≥90% domain coverage, and packages everything into a standalone Windows installer with bundled local models (<2 GB total).
 
 ## Technical Context
 
 **Language/Version**: Python ≥3.11 (development on 3.13 per `.python-version`)
 **Primary Dependencies**: Flet (UI, replacing customtkinter), FFmpeg/imageio-ffmpeg (video encoding), OpenCV (visual analysis), Ultralytics YOLOv8n (person/instrument detection), librosa + scipy (audio analysis), onnxruntime (audio classifier inference), openai-whisper + torch/torchaudio (speech transcription), google-api-python-client + google-auth-oauthlib (YouTube/Forms APIs), google-generativeai (optional Gemini enrichment), PyInstaller (installer packaging)
-**Storage**: Plain-text JSON files in per-user app config directory (checkpoints, configuration, upload state, credentials)
+**Storage**: Plain-text JSON for mutable app state in per-user app config directory (checkpoints, configuration, upload state, credentials), plus bundled read-only SQLite reference dictionary for music lookup
 **Testing**: pytest + pytest-cov (≥80% overall, ≥90% domain), pyright (static type checking), ruff (linting)
 **Target Platform**: Windows 10/11 desktop (primary); architecture must not preclude future cross-platform
 **Project Type**: Desktop application (standalone installer)
@@ -45,7 +45,7 @@ Full architecture refactor of CVCutter — a concert video splitting, audio sync
 - [x] Plan defines migration or regeneration steps when storage or metadata formats change.
       *Evidence: Auto-migration service runs on first launch; converts legacy `app_config.json` and `upload_state.json` to the new schema/persistence model. Legacy checkpoints are invalidated and regenerated.*
 - [x] Plan enforces module-size policy: files over 1000 lines are split or decomposed.
-      *Evidence: Current `app.py` (957 lines) is decomposed into presentation layer subpackages. Hard limit enforced by ruff rule or CI line-count check.*
+      *Evidence: Current `app.py` (957 lines) is decomposed into presentation layer subpackages. Hard limit enforced by `tools/check_module_size.py` in local/CI quality gates.*
 - [x] Plan includes independent review perspectives and review-evidence collection before merge.
       *Evidence: Dual-perspective code review (architecture/boundaries + correctness/domain-logic) using multiple AI models, with CI pass evidence attached per CA-008.*
 - [x] Plan documents DRY, KISS, and OOP adherence alongside domain boundaries.
@@ -106,6 +106,7 @@ src/cvcutter/
 │       ├── video_io.py              # Protocol: video read/write/transcode
 │       ├── model_runner.py          # Protocol: ML model inference
 │       ├── checkpoint_store.py      # Protocol: checkpoint persistence
+│       ├── project_store.py         # Protocol: project aggregate persistence
 │       ├── quota_state_store.py     # Protocol: global quota-state persistence
 │       ├── pdf_text_extractor.py    # Protocol: local PDF text extraction
 │       ├── music_lookup.py          # Protocol: bundled music dictionary lookup
@@ -159,6 +160,7 @@ src/cvcutter/
 │   ├── persistence/                 # File-system persistence
 │   │   ├── __init__.py
 │   │   ├── json_checkpoint_store.py # Implements checkpoint_store protocol
+│   │   ├── json_project_store.py    # Implements project_store protocol
 │   │   ├── json_quota_state_store.py # Implements quota_state_store protocol
 │   │   ├── json_config.py           # Configuration read/write
 │   │   └── json_credential_store.py # Implements credential_store protocol
@@ -202,7 +204,9 @@ tests/
 │   ├── application/
 │   │   ├── test_pipeline.py
 │   │   ├── test_upload_workflow.py
-│   │   └── test_checkpoint_manager.py
+│   │   ├── test_checkpoint_manager.py
+│   │   ├── test_mapping_workflow.py
+│   │   └── test_migration_service.py
 │   └── infrastructure/
 │       ├── test_json_checkpoint_store.py
 │       ├── test_json_config.py
@@ -213,7 +217,12 @@ tests/
 │   └── test_upload_with_quota.py    # Upload → quota → resume pipeline
 └── contract/
     ├── test_youtube_contract.py     # YouTube API adapter contract tests
-    └── test_gemini_contract.py      # Gemini adapter contract tests
+    ├── test_gemini_contract.py      # Gemini adapter contract tests
+    ├── test_forms_contract.py       # Google Forms adapter contract tests
+    └── test_sheets_contract.py      # Google Sheets adapter contract tests
+
+tools/
+└── check_module_size.py             # Fails if any module exceeds 1000 LOC
 ```
 
 **Structure Decision**: Single-project four-layer architecture under `src/cvcutter/` with domain, application, infrastructure, and presentation packages. This enforces the constitution's separation requirements (CA-001) while keeping the project as a single installable Python package. The `domain/` package has zero imports from `infrastructure/` or `presentation/`; all cross-layer communication uses Protocol-based interfaces defined in `domain/services/`.

@@ -13,7 +13,7 @@ These are the Protocol-based interfaces defined in `src/cvcutter/domain/services
 Abstracts all video/audio file I/O and transcoding operations.
 
 ```python
-from typing import Protocol, Iterator
+from typing import Protocol, Iterator, Callable
 from pathlib import Path
 
 class VideoIOService(Protocol):
@@ -23,8 +23,10 @@ class VideoIOService(Protocol):
         """Extract metadata (duration, resolution, codec, etc.) from a video/audio file."""
         ...
 
-    def concatenate(self, video_paths: list[Path], output_path: Path) -> Path:
-        """Concatenate multiple video files into a single continuous file."""
+    def concatenate(self, video_paths: list[Path], output_path: Path,
+                    progress_callback: Callable[[int, int], None] | None = None) -> Path:
+        """Concatenate multiple video files into a single continuous file.
+        progress_callback receives (bytes_processed, total_bytes)."""
         ...
 
     def extract_audio(self, video_path: Path, output_path: Path,
@@ -36,8 +38,10 @@ class VideoIOService(Protocol):
                        start_seconds: float, end_seconds: float,
                        audio_mix: AudioMixConfig | None = None,
                        quality: str = "high",
-                       use_gpu: bool = False) -> Path:
-        """Export a time-range segment with optional audio mixing and GPU acceleration."""
+                       use_gpu: bool = False,
+                       progress_callback: Callable[[int, int], None] | None = None) -> Path:
+        """Export a time-range segment with optional audio mixing and GPU acceleration.
+        progress_callback receives (bytes_processed, total_bytes)."""
         ...
 
     def stream_frames(self, video_path: Path, fps: float = 1.0,
@@ -152,6 +156,69 @@ class CheckpointStore(Protocol):
 ```
 
 **Adapter**: `infrastructure/persistence/json_checkpoint_store.py`
+
+---
+
+## ProjectStore (`domain/services/project_store.py`)
+
+Abstracts persistence of project aggregate state.
+
+```python
+from typing import Protocol
+
+class ProjectStore(Protocol):
+    """Port for reading/writing project aggregate JSON artifacts."""
+
+    def save_project(self, project: ConcertProject) -> None:
+        """Persist project root metadata."""
+        ...
+
+    def load_project(self, project_id: str) -> ConcertProject | None:
+        """Load project root metadata."""
+        ...
+
+    def save_segments(self, project_id: str, segments: list[PerformanceSegment]) -> None:
+        """Persist segment list."""
+        ...
+
+    def load_segments(self, project_id: str) -> list[PerformanceSegment]:
+        """Load segment list."""
+        ...
+
+    def save_mappings(self, project_id: str, mappings: list[VideoMetadataMapping]) -> None:
+        """Persist mapping list."""
+        ...
+
+    def load_mappings(self, project_id: str) -> list[VideoMetadataMapping]:
+        """Load mapping list."""
+        ...
+
+    def save_upload_records(self, project_id: str, uploads: list[UploadRecord]) -> None:
+        """Persist upload records."""
+        ...
+
+    def load_upload_records(self, project_id: str) -> list[UploadRecord]:
+        """Load upload records."""
+        ...
+
+    def save_program_entries(self, project_id: str, entries: list[ProgramEntry]) -> None:
+        """Persist program entries."""
+        ...
+
+    def load_program_entries(self, project_id: str) -> list[ProgramEntry]:
+        """Load program entries."""
+        ...
+
+    def save_form_responses(self, project_id: str, responses: list[FormResponse]) -> None:
+        """Persist form responses."""
+        ...
+
+    def load_form_responses(self, project_id: str) -> list[FormResponse]:
+        """Load form responses."""
+        ...
+```
+
+**Adapter**: `infrastructure/persistence/json_project_store.py`
 
 ---
 

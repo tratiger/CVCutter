@@ -114,7 +114,7 @@
 
 ## R-007: Installer Packaging with Bundled Models
 
-**Decision**: PyInstaller-based standalone Windows installer (`.exe` or directory bundle). All local models (YOLOv8n ~6 MB, Whisper small ~461 MB, audio classifier ~50 MB) bundled as data files within the installer artifact.
+**Decision**: PyInstaller-based standalone Windows installer artifact (installer executable wrapping bundled app payload). All local models (YOLOv8n ~6 MB, Whisper small ~461 MB, audio classifier ~50 MB) bundled as data files within the installer artifact.
 
 **Rationale**: Current approach already uses PyInstaller (`build_exe.py`). Expanding it to include model files is straightforward. NSIS wrapper can create a proper Windows installer (Start Menu shortcut, uninstaller) around the PyInstaller output.
 

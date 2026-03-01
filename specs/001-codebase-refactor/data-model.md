@@ -9,15 +9,16 @@
 ```text
 ConcertProject ─────┬──── 1:N ──── SourceVideo
                      ├──── 0:1 ──── ExternalAudio
-                     ├──── 1:N ──── PerformanceSegment
+                     ├──── 0:N ──── PerformanceSegment
                      ├──── 0:N ──── ProgramEntry
                      ├──── 0:N ──── FormResponse
-                     ├──── 1:N ──── Checkpoint
+                     ├──── 0:N ──── Checkpoint
                      └──── 0:N ──── UploadRecord
 
 PerformanceSegment ──┬──── 0:1 ──── VideoMetadataMapping ──┬── 0:1 ── ProgramEntry
                      │                                      └── 0:1 ── FormResponse
                      └──── 0:1 ──── UploadRecord
+UploadRecord ────────────── 1:1 ──── VideoMetadataMapping
 
 MusicMetadataDictionary (read-only) ── assists ── VideoMetadataMapping
 ```
@@ -40,6 +41,10 @@ Top-level aggregate root. Represents a single concert processing job.
 | `venue` | `str \| None` | optional, max 200 | Concert venue name |
 | `source_videos` | `list[SourceVideo]` | required, ≥1 | Ordered list of input video files |
 | `external_audio` | `ExternalAudio \| None` | optional | External microphone recording |
+| `program_pdf_path` | `Path \| None` | optional | Source concert program PDF path |
+| `form_source_path` | `Path \| None` | optional | Source form-response input path (CSV/API export) |
+| `form_remote_id` | `str \| None` | optional | Google Form identifier when using remote fetch |
+| `form_remote_sheet_id` | `str \| None` | optional | Google Sheet identifier when using remote fetch |
 | `output_directory` | `Path` | required | Export destination directory |
 | `config_snapshot` | `ProjectConfig` | required | Processing configuration at creation |
 | `processing_state` | `ProcessingState` | required | Current pipeline state enum |
@@ -50,6 +55,9 @@ Top-level aggregate root. Represents a single concert processing job.
 - `source_videos` must contain at least one entry
 - `output_directory` must be a valid, writable filesystem path
 - `name` must not be empty or whitespace-only
+- `program_pdf_path`, when present, must point to a readable PDF file
+- `form_source_path`, when present, must point to a readable source file
+- `form_remote_id` and/or `form_remote_sheet_id`, when present, must be non-empty identifiers
 
 **State Transitions**:
 ```text
@@ -63,6 +71,7 @@ CREATED → CONCATENATING → DETECTING → SYNCING_AUDIO → READY_FOR_EXPORT �
 
 **Execution Note**: `DETECTING` and `SYNCING_AUDIO` are independent stages in the checkpoint dependency graph; this transition order is a serialized UI/runtime display sequence, and invalidation/resume behavior follows the dependency graph defined below.
 **Resume Regression Note**: When checkpoints are invalidated, `ProcessingState` regresses to the earliest invalidated execution stage required for deterministic replay (while keeping completed, unaffected stages intact).
+**Pause/Failure Recovery Note**: `resume_processing()` transitions `PAUSED` (or recoverable `FAILED`) projects to the earliest resumable checkpoint stage; `start_processing()` transitions `PAUSED`/`FAILED` projects to `CREATED` for full restart.
 
 ---
 
@@ -130,6 +139,12 @@ A detected time range corresponding to a single musical performance.
 - `end_time_seconds - start_time_seconds` ≥ `min_duration_seconds` config value (default 30s)
 - `segment_index` values must be unique and sequential within a project
 
+**Manual Split Rules**:
+- `split_segment(segment_id, split_time)` creates two segments with new UUIDs and reassigns sequential `segment_index` values from the split point onward.
+- Manual splits mark affected segments as `user_adjusted=True` and preserve upstream detection checkpoint provenance as user-overridden output.
+- Per-segment checkpoints at/after the split point are re-addressed to the new indices and downstream export/mapping/upload checkpoints are invalidated for affected segments.
+- `DetectionSignal` ranges are re-associated to child segments by time overlap; signals crossing the split point are partitioned to both children.
+
 ---
 
 ### DetectionSignal
@@ -196,7 +211,6 @@ Read-only bundled reference dataset used by lookup-based mapping.
 | `revision_id` | `str` | required, immutable | Dictionary source revision identifier |
 | `source_summary` | `str` | required | Curation/source description for auditability |
 | `generated_at_utc` | `datetime` | required | Dictionary build timestamp |
-| `storage_path` | `Path` | required | Local bundled SQLite dictionary path |
 | `entry_count` | `int` | ≥0 | Total indexed works/performers |
 
 **Validation Rules**:
@@ -364,7 +378,7 @@ Value object holding project-level processing configuration.
 
 ## JSON Persistence Format
 
-All mutable state (checkpoints, config, upload state) is persisted as plain-text JSON in the per-user application config directory:
+Application state (checkpoints, config, upload state) is persisted as plain-text JSON in the per-user application config directory; reference assets are read-only and revision-validated:
 
 ```text
 {LOCALAPPDATA}/cvcutter/

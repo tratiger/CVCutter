@@ -51,7 +51,7 @@ uv run ruff check .
 uv run ruff check . --fix
 
 # Run all quality gates (must pass before merge)
-uv run ruff check . && uv run pyright && uv run pytest --cov=src/cvcutter --cov-report=term-missing
+uv run ruff check . && uv run pyright && uv run pytest --cov=src/cvcutter --cov-report=term-missing && uv run python tools/check_module_size.py
 ```
 
 ## Project Structure Overview
@@ -87,8 +87,8 @@ tests/
 
 ### Processing a Concert
 
-1. **Load**: Select video files, optional mic audio, program PDF, form CSV
-2. **Process**: Pipeline runs: concatenate → detect segments → sync audio → prepare `READY_FOR_EXPORT`
+1. **Load**: Select video files, optional mic audio, program PDF, and form source (CSV or remote form IDs)
+2. **Process**: Pipeline runs: concatenate → {detect segments, sync audio} → prepare `READY_FOR_EXPORT`
 3. **Preview/Map**: Review/adjust boundaries, export segments, then auto-match metadata with manual correction
 4. **Upload**: Batch upload to YouTube with metadata; quota management handles limits
 
@@ -120,11 +120,16 @@ uv run python build_exe.py
 # Release installer packaging wraps this dist output into a Windows installer artifact.
 ```
 
+Release packaging validation:
+- Run the installer packaging step in the release pipeline (NSIS wrapper over `dist/`)
+- Validate install/launch/uninstall on a clean Windows environment
+
 The release installer bundles:
 - Python runtime + all dependencies
 - YOLOv8n model (~6 MB)
 - Whisper small model (~461 MB)
 - Audio content classifier (~50 MB)
+- Music metadata dictionary (bundled SQLite, read-only)
 - Flet runtime assets
 
 ## Testing Strategy

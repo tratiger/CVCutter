@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-codebase-refactor`
 **Created**: 2026-03-01
-**Status**: Draft
+**Status**: Ready
 **Input**: User description: "Large-scale CVCutter refactor: architecture separation (MVC/MVVM), modern UI (evaluate flet migration from customtkinter), installer packaging, performance/memory optimization, resume capability, improved video-to-performance mapping via speech transcription and music-information lookup, improved performance-segment detection using multimodal/local methods without external APIs. Maintain identity as integrated concert video splitting, audio synchronization, and YouTube upload orchestration tool."
 
 ## Assumptions
@@ -31,7 +31,7 @@ As a concert video operator, I want to load one or more raw concert video files 
 
 **Acceptance Scenarios**:
 
-1. **Given** a single 2-hour concert video file and a corresponding external microphone recording, **When** the user initiates processing, **Then** the system detects all performance segments, synchronizes audio, and exports each segment as a separate file in the configured output directory.
+1. **Given** a single 2-hour concert video file and a corresponding external microphone recording, **When** the user initiates processing, **Then** the system detects all performance segments and synchronizes audio, then allows boundary review before exporting each segment as a separate file in the configured output directory.
 2. **Given** a concert recorded across multiple video files (e.g., 3 files due to camera memory limits), **When** the user loads all files in order, **Then** the system concatenates them logically and detects performances across file boundaries without missing or duplicating segments.
 3. **Given** a concert video without an external microphone recording, **When** the user initiates processing with mic audio omitted, **Then** the system processes using the video's embedded audio only, with no errors.
 4. **Given** a video where GPU acceleration is available, **When** the user processes with GPU enabled, **Then** encoding completes faster than CPU-only mode with equivalent output quality.

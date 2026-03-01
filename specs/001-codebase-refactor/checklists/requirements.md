@@ -16,7 +16,7 @@
 - [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
-- [x] Success criteria are technology-agnostic (no implementation details)
+- [ ] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
 - [x] Edge cases are identified
 - [x] Scope is clearly bounded
@@ -31,7 +31,7 @@
 
 ## Notes
 
-- Most quality items pass validation; two implementation-detail checks remain intentionally unchecked.
+- Most quality items pass validation; three implementation-detail checks remain intentionally unchecked.
 - The spec makes informed assumptions (documented in the Assumptions section) for areas that could be ambiguous, avoiding the need for clarification markers.
 - The spec intentionally preserves some implementation-constraining details from explicit user input (e.g., UI framework evaluation scope) and constitution-alignment obligations.
 - Constitution Alignment section references toolchain specifics (`uv`, `ruff`, `pyright`) because the constitution mandates these; this is treated as governance alignment rather than accidental leakage.

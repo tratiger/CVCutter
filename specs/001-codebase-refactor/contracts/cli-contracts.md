@@ -4,7 +4,7 @@
 **Created**: 2026-03-01
 **Layer**: Presentation boundary (User-facing interfaces)
 
-CVCutter is a desktop GUI application. It does not expose a public library API or CLI commands to external consumers. This document defines the user-facing interface contracts: application entry points, Flet UI screen contracts, and the view-model contracts that bridge UI to application logic.
+CVCutter is a desktop GUI application. It does not expose a functional public CLI API beyond command-based app launch entrypoints. This document defines the user-facing interface contracts: application entry points, Flet UI screen contracts, and the view-model contracts that bridge UI to application logic.
 
 ---
 
@@ -59,6 +59,8 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `external_audio_file` | `Path \| None` | Optional mic audio path |
 | `program_pdf_file` | `Path \| None` | Optional concert program PDF |
 | `form_csv_file` | `Path \| None` | Optional Google Form CSV |
+| `form_remote_id` | `str \| None` | Optional Google Form ID for remote fetch |
+| `form_remote_sheet_id` | `str \| None` | Optional Google Sheet ID for remote fetch |
 | `output_directory` | `Path` | Export destination |
 | `project_name` | `str` | Project display name |
 | `validation_errors` | `list[str]` | Current validation issues |
@@ -72,6 +74,7 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `set_external_audio()` | file dialog | Set mic audio file |
 | `set_program_pdf()` | file dialog | Set PDF file |
 | `set_form_csv()` | file dialog | Set form CSV file |
+| `set_form_remote_source(form_id, sheet_id)` | str \| None, str \| None | Set optional remote Google Forms/Sheets source IDs |
 | `create_project()` | — | Validate and create ConcertProject |
 
 ---
@@ -99,7 +102,7 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `start_processing()` | — | Begin from scratch |
 | `resume_processing()` | — | Resume from last checkpoint |
 | `pause_processing()` | — | Pause at next stage boundary |
-| `cancel_processing()` | — | Cancel and retain checkpoints |
+| `cancel_processing()` | — | Cancel current run, retain checkpoints, and transition to `PAUSED` with cancel reason |
 
 ---
 
@@ -113,20 +116,24 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `mappings` | `list[MappingPreview]` | Current segment-metadata mappings |
 | `program_entries` | `list[ProgramEntry]` | Available program entries |
 | `form_responses` | `list[FormResponse]` | Available form responses |
-| `unmatched_segments` | `list[int]` | Segment indices without confident match |
-| `uncertain_mappings` | `list[int]` | Mapping indices below confidence threshold |
-| `selected_segment_index` | `int \| None` | Currently selected segment |
+| `unmatched_segments` | `list[str]` | Segment IDs without confident match |
+| `uncertain_mappings` | `list[str]` | Mapping IDs below confidence threshold |
+| `selected_segment_id` | `str \| None` | Currently selected segment |
+| `cloud_enrichment_available` | `bool` | Whether optional cloud enrichment is currently reachable |
+| `mapping_fallback_mode` | `bool` | True when local-only fallback mapping is active |
 | `processing_state` | `ProcessingState` | Current workflow state for command gating |
 
 | Command | Parameters | Effect |
 |---------|-----------|--------|
-| `select_segment(index)` | int | Load preview for segment |
-| `adjust_boundary(index, start, end)` | int, float, float | Update segment boundaries (enabled in `READY_FOR_EXPORT` state) |
-| `assign_mapping(seg_idx, entry_idx)` | int, int | Manual program-entry assignment (enabled in `MAPPING` state) |
-| `assign_form_response(seg_idx, form_idx)` | int, int | Manual form-response assignment (enabled in `MAPPING` state) |
-| `clear_mapping(seg_idx)` | int | Remove mapping from segment |
-| `verify_mapping(seg_idx)` | int | Mark mapping as user-verified |
+| `select_segment(segment_id)` | str | Load preview for segment |
+| `adjust_boundary(segment_id, start, end)` | str, float, float | Update segment boundaries (enabled in `READY_FOR_EXPORT` state) |
+| `split_segment(segment_id, split_time)` | str, float | Split a long segment into two segments (enabled in `READY_FOR_EXPORT` state) |
+| `assign_mapping(segment_id, program_entry_id)` | str, str | Manual program-entry assignment (enabled in `MAPPING` state) |
+| `assign_form_response(segment_id, form_response_id)` | str, str | Manual form-response assignment (enabled in `MAPPING` state) |
+| `clear_mapping(segment_id)` | str | Remove mapping from segment |
+| `verify_mapping(segment_id)` | str | Mark mapping as user-verified |
 | `auto_map()` | — | Run automatic mapping pipeline (enabled in `MAPPING` state) |
+| `finalize_mappings()` | — | Validate mapping preconditions and transition to `READY_FOR_UPLOAD` |
 | `export_segments()` | — | Export all segments to output directory (enabled in `READY_FOR_EXPORT` state) |
 
 ---
@@ -143,14 +150,16 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `queued_count` | `int` | Number of uploads waiting for quota reset |
 | `playlist_id` | `str \| None` | Target playlist |
 | `processing_state` | `ProcessingState` | Current workflow state for command gating |
+| `estimated_time_remaining` | `str` | Estimated time to complete current upload batch |
+| `current_operation` | `str` | Description of current upload operation |
 
 | Command | Parameters | Effect |
 |---------|-----------|--------|
 | `start_upload()` | — | Begin batch upload (enabled only in `READY_FOR_UPLOAD` with mappings below review-threshold explicitly verified and finalized metadata) |
 | `pause_upload()` | — | Pause after current upload |
-| `retry_failed(index)` | int | Retry a specific failed upload |
+| `retry_failed(upload_record_id)` | str | Retry a specific failed upload |
 | `create_playlist(title)` | str | Create YouTube playlist |
-| `open_youtube(index)` | int | Open uploaded video URL in browser |
+| `open_youtube(upload_record_id)` | str | Open uploaded video URL in browser |
 
 ---
 
@@ -170,6 +179,8 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `update_config(key, value)` | str, Any | Update a config setting |
 | `authenticate_youtube()` | — | Run OAuth2 flow |
 | `test_gemini_connection()` | — | Verify Gemini API key |
+| `set_artifact_retention(policy)` | str | Set checkpoint/temp artifact retention policy |
+| `purge_artifacts(project_id)` | str | Purge checkpoints/temp artifacts for a project |
 | `reset_to_defaults()` | — | Reset all settings to defaults |
 
 ---
