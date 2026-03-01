@@ -188,7 +188,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 - Q: How should installer artifacts be distributed with local models? → A: Use one downloadable installer artifact that bundles all required local models (no separate companion package and no network fetch during install/first run).
 - Q: Should optional secure-store mode for API credentials be implemented in this refactor? → A: No. For this refactor scope, credential handling remains local plain-text JSON with per-user ACL restriction and secret redaction controls.
 - Q: How should music-information lookup be concretely implemented? → A: Use a bundled local music-metadata dictionary (title/composer/performer), curated by the development side from internet sources before release; no user runtime network fetch is allowed.
-- Q: How should detection accuracy targets apply when YOLO visual analysis is disabled? → A: Use dual targets: full visual-audio mode requires ≥90% boundary accuracy (±5 seconds), while audio-only fallback mode requires ≥80% boundary accuracy (±8 seconds).
+- Q: How should detection accuracy targets apply when YOLO visual analysis is disabled? → A: Use dual targets with both metrics: full visual-audio mode requires recall ≥90% and boundary accuracy ≥90% (±5 seconds), while audio-only fallback mode requires recall ≥80% and boundary accuracy ≥80% (±8 seconds).
 - Q: How should YouTube upload quota reset timing be defined? → A: Use YouTube Data API semantics, with daily quota reset at Pacific Time 00:00 as the scheduling baseline.
 - Q: How should detection quality metrics be defined in Success Criteria? → A: Split SC-002 into Recall and Boundary Accuracy for both modes, with explicit thresholds and tolerance windows.
 - Q: How should audio content classification be implemented? → A: Use a lightweight pre-trained local audio classifier for music/speech/applause as a required detection signal.
@@ -238,7 +238,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 
 #### Resume & Checkpointing
 
-- **FR-040**: The system MUST save processing state at meaningful checkpoints (after concatenation, after detection, after each segment export, after mapping, after each upload).
+- **FR-040**: The system MUST save processing state at meaningful checkpoints (after concatenation, after detection, after audio synchronization, after each segment export, after mapping, after each upload).
 - **FR-041**: The system MUST detect whether source inputs, configuration, or model identifiers/versions have changed since the last checkpoint and invalidate affected checkpoints accordingly.
 - **FR-042**: For processing checkpoints, the system MUST allow the user to explicitly choose between resuming from checkpoint or restarting from scratch.
 - **FR-043**: Checkpoint data MUST be persisted as plain-text JSON files in the application's config directory. Each checkpoint file MUST include sufficient information to reproduce results: a means of verifying that source inputs have not changed, the configuration values used, model identifiers/versions/hashes, and references to intermediate outputs.
@@ -253,7 +253,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 - **FR-051**: The system MUST track daily API quota usage and prevent uploads that would exceed the daily limit, queuing excess uploads until the YouTube quota reset point (Pacific Time 00:00).
 - **FR-052**: The system MUST use resumable uploads to handle network interruptions without re-uploading completed portions.
 - **FR-053**: The system MUST support playlist creation and assignment for concert groupings.
-- **FR-054**: The system MUST display upload status for each video (pending, uploading, completed, failed) with YouTube URLs for completed uploads.
+- **FR-054**: The system MUST display upload status for each video (pending, queued, uploading, completed, failed) with YouTube URLs for completed uploads.
 - **FR-055**: Queued uploads MUST resume automatically at the quota reset point (Pacific Time 00:00) while the application is running; if the application is not running at reset time, queued uploads MUST auto-resume on next launch without requiring remapping.
 
 #### User Interface
@@ -268,7 +268,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 
 - **FR-070**: The system MUST be packageable as a standalone Windows installer that includes all runtime dependencies (no separate Python installation required).
 - **FR-071**: The installer MUST provide all required local models (detection, transcription) without requiring install-time or first-run network downloads.
-- **FR-072**: The installer MUST support clean upgrades that preserve user settings and checkpoint data.
+- **FR-072**: The installer MUST support clean upgrades that preserve user settings and schema-compatible checkpoint data; schema-breaking upgrades (including this refactor) MAY invalidate legacy checkpoints if regeneration rules are explicit and user-visible.
 
 #### Performance & Resource Efficiency
 
@@ -287,8 +287,8 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 - **Program Entry**: A single item from the concert program PDF. Key attributes: performance order number, piece title, composer, performer names, ensemble/instrument.
 - **Music Metadata Dictionary**: Bundled offline reference dataset curated before release for lookup assistance. Key attributes: normalized piece title, composer aliases, performer/ensemble aliases, source revision identifier.
 - **Form Response**: A performer's response from the Google Form. Key attributes: performer name, piece title, privacy preference, display name override, custom description.
-- **Video-Metadata Mapping**: The association between a Performance Segment and a Program Entry (and optionally a Form Response). Key attributes: segment reference, program entry reference, form response reference, match confidence, match method (sequential/transcription/manual), user-verified flag.
-- **Upload Record**: Tracks the YouTube upload state for a single video. Key attributes: segment reference, YouTube video ID, upload status (pending/uploading/completed/failed), privacy setting, playlist assignment, quota cost, error details.
+- **Video-Metadata Mapping**: The association between a Performance Segment and a Program Entry (and optionally a Form Response). Key attributes: segment reference, program entry reference, form response reference, match confidence, match method (sequential/transcription/lookup/manual), user-verified flag.
+- **Upload Record**: Tracks the YouTube upload state for a single video. Key attributes: segment reference, YouTube video ID, upload status (pending/queued/uploading/completed/failed), privacy setting, playlist assignment, quota cost, error details.
 
 ## Constitution Alignment *(mandatory)*
 
@@ -302,7 +302,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 
 - **CA-005 Quality Gates**: All code must pass `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` before merge. Minimum test coverage threshold: 80% overall, 90% for domain modules. These gates must run in CI (GitHub Actions) and be reproducible locally.
 
-- **CA-006 Migration/Regeneration**: The refactor replaces the existing flat-file configuration, upload-state tracking, and processing state management. Old configuration files (JSON-based ConfigManager) MUST be migrated automatically on first launch of the new version, requiring no manual intervention. Legacy checkpoint files are invalidated and regenerated under the new format. Upload state (upload_state.json) must be migrated to the new checkpoint system as part of the same auto-migration process.
+- **CA-006 Migration/Regeneration**: The refactor replaces the existing flat-file configuration, upload-state tracking, and processing state management. Old configuration files (JSON-based ConfigManager) MUST be migrated automatically on first launch of the new version, requiring no manual intervention. Legacy checkpoint files are invalidated and regenerated under the new format. Upload state (`upload_state.json`) MUST be migrated to the new upload persistence model (`uploads.json`, with upload checkpoints regenerated as needed) as part of the same auto-migration process.
 
 - **CA-007 Module Size**: The current app.py (957 lines), google_form_connector.py (665 lines), and youtube_uploader.py (555 lines) should be decomposed for boundary clarity and maintainability, while the architecture enforces <1,000 lines per module as a hard limit. Automated checks in CI should flag modules exceeding the limit.
 
