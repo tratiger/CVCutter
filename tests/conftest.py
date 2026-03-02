@@ -7,14 +7,14 @@ contract, and security tests.
 from __future__ import annotations
 
 import json
-import tempfile
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ──────────────────────────────────────────────────────
 # Fixture: Temporary project directory

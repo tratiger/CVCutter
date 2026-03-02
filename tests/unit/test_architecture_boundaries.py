@@ -11,10 +11,7 @@ These tests use AST parsing to inspect import statements without executing code.
 from __future__ import annotations
 
 import ast
-import importlib
-import pkgutil
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -76,9 +73,8 @@ def _extract_imports(file_path: Path) -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imports.append(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.append(node.module)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.append(node.module)
     return imports
 
 
@@ -97,7 +93,7 @@ class TestDomainBoundary:
                         violations.append(f"{rel}: imports '{imp}'")
 
         assert violations == [], (
-            f"Domain boundary violation(s):\n" + "\n".join(f"  - {v}" for v in violations)
+            "Domain boundary violation(s):\n" + "\n".join(f"  - {v}" for v in violations)
         )
 
     def test_domain_has_no_presentation_imports(self) -> None:
@@ -111,7 +107,7 @@ class TestDomainBoundary:
                     violations.append(f"{rel}: imports '{imp}'")
 
         assert violations == [], (
-            f"Domain→Presentation violation(s):\n" + "\n".join(f"  - {v}" for v in violations)
+            "Domain→Presentation violation(s):\n" + "\n".join(f"  - {v}" for v in violations)
         )
 
     def test_domain_services_only_use_domain_types(self) -> None:
@@ -131,7 +127,7 @@ class TestDomainBoundary:
                     violations.append(f"{rel}: imports '{imp}'")
 
         assert violations == [], (
-            f"Domain services boundary violation(s):\n"
+            "Domain services boundary violation(s):\n"
             + "\n".join(f"  - {v}" for v in violations)
         )
 
@@ -154,7 +150,7 @@ class TestApplicationBoundary:
                     violations.append(f"{rel}: imports '{imp}'")
 
         assert violations == [], (
-            f"Application→Presentation violation(s):\n"
+            "Application→Presentation violation(s):\n"
             + "\n".join(f"  - {v}" for v in violations)
         )
 
@@ -177,7 +173,7 @@ class TestInfrastructureBoundary:
                     violations.append(f"{rel}: imports '{imp}'")
 
         assert violations == [], (
-            f"Infrastructure→Application violation(s):\n"
+            "Infrastructure→Application violation(s):\n"
             + "\n".join(f"  - {v}" for v in violations)
         )
 
@@ -196,7 +192,7 @@ class TestInfrastructureBoundary:
                     violations.append(f"{rel}: imports '{imp}'")
 
         assert violations == [], (
-            f"Infrastructure→Presentation violation(s):\n"
+            "Infrastructure→Presentation violation(s):\n"
             + "\n".join(f"  - {v}" for v in violations)
         )
 
@@ -214,6 +210,6 @@ class TestModuleSizePolicy:
                 violations.append((str(rel), line_count))
 
         assert violations == [], (
-            f"Module size violation(s) (>1000 lines):\n"
+            "Module size violation(s) (>1000 lines):\n"
             + "\n".join(f"  - {path}: {count} lines" for path, count in violations)
         )
