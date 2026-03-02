@@ -12,7 +12,14 @@
   - Googleフォームから演奏者自身の希望（公開設定、説明文）を取得。
 - **スマートマッピング**: 動画ファイルと演奏情報をAI支援で自動紐付けし、必要に応じて手動補正できます。
 - **YouTube自動アップロード**: クォータ制限を考慮しながら自動アップロードを実行。
-- **モダンなGUI**: `customtkinter` を採用した使いやすいインターフェース。
+- **モダンなGUI**: `Flet` を採用した使いやすいインターフェース。
+
+## アーキテクチャ概要（4層構造）
+
+- **Domain (`src/cvcutter/domain`)**: エンティティ、値オブジェクト、ドメインルール、サービス契約。
+- **Application (`src/cvcutter/application`)**: ユースケース（パイプライン、マッピング、アップロード、移行）とオーケストレーション。
+- **Infrastructure (`src/cvcutter/infrastructure`)**: FFmpeg・モデル推論・永続化・外部APIアダプター実装。
+- **Presentation (`src/cvcutter/presentation`)**: Flet UI（View / ViewModel）とユーザー操作フロー。
 
 ## セットアップ (開発者向け)
 

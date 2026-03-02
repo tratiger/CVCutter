@@ -1,23 +1,36 @@
 [project]
 name = "cvcutter"
-version = "0.1.0"
+version = "0.2.0"
 description = "Concert Video Cutter & Uploader"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "moviepy>=1.0.3",
-    "pydub>=0.25.1",
-    "tqdm>=4.67.1",
+    "flet>=0.25.0",
     "opencv-python>=4.10.0.84",
     "librosa>=0.10.2.post1",
     "scipy>=1.14.1",
+    "numpy>=1.26.0",
     "google-auth-oauthlib>=1.2.1",
     "google-auth-httplib2>=0.2.0",
     "google-api-python-client>=2.155.0",
-    "customtkinter>=5.2.2",
     "pillow>=11.0.0",
-    "pyinstaller>=6.11.1",
     "google-generativeai>=0.3.0",
+    "ultralytics>=8.0.0",
+    "openai-whisper>=20231117",
+    "onnxruntime>=1.16.0",
+    "imageio-ffmpeg>=0.5.1",
+    "tqdm>=4.67.1",
+    "pydub>=0.25.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pyright>=1.1.350",
+    "ruff>=0.5.0",
+    "pyinstaller>=6.11.1",
 ]
 
 [build-system]
@@ -28,4 +41,78 @@ build-backend = "hatchling.build"
 packages = ["src/cvcutter"]
 
 [project.scripts]
-cvcutter = "cvcutter.app:main"
+cvcutter = "cvcutter.main:main"
+
+# === Tool Configuration (T004) ===
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--strict-markers -ra"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: integration tests requiring external resources",
+    "contract: contract tests for external adapters",
+    "benchmark: performance benchmark tests",
+    "security: security validation tests",
+]
+
+[tool.coverage.run]
+source = ["src/cvcutter"]
+omit = [
+    "src/cvcutter/__pycache__/*",
+    "tests/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "\\.\\.\\.",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cvcutter"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+pythonPlatform = "Windows"
+typeCheckingMode = "basic"
+include = ["src/cvcutter"]
+exclude = [
+    "**/__pycache__",
+    "tests",
+    "build",
+    "dist",
+]
+reportMissingImports = true
+reportMissingTypeStubs = false
