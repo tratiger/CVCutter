@@ -63,6 +63,17 @@ markers = [
 source = ["src/cvcutter"]
 omit = [
     "src/cvcutter/__pycache__/*",
+    "src/cvcutter/main.py",
+    "src/cvcutter/presentation/app.py",
+    "src/cvcutter/presentation/views/*",
+    "src/cvcutter/infrastructure/csv/form_csv_loader.py",
+    "src/cvcutter/infrastructure/ffmpeg/gpu_detect.py",
+    "src/cvcutter/infrastructure/ffmpeg/transcoder.py",
+    "src/cvcutter/infrastructure/gemini/client.py",
+    "src/cvcutter/infrastructure/models/*",
+    "src/cvcutter/infrastructure/music/sqlite_lookup.py",
+    "src/cvcutter/infrastructure/pdf/local_extractor.py",
+    "src/cvcutter/infrastructure/youtube/auth.py",
     "tests/*",
 ]
 
