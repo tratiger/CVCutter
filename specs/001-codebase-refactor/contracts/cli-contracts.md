@@ -96,6 +96,8 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `resume_info` | `ResumeInfo \| None` | Checkpoint state for resume prompt |
 | `errors` | `list[str]` | Processing errors |
 | `gpu_enabled` | `bool` | Whether GPU is active |
+| `detection_mode` | `str` | `full` or `audio_only` detection mode |
+| `reduced_accuracy_notice` | `str \| None` | User-visible notice shown whenever detection runs in audio-only mode |
 
 | Command | Parameters | Effect |
 |---------|-----------|--------|
@@ -103,6 +105,19 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `resume_processing()` | — | Resume from last checkpoint |
 | `pause_processing()` | — | Pause at next stage boundary |
 | `cancel_processing()` | — | Cancel current run, retain checkpoints, and transition to `PAUSED` with cancel reason |
+
+#### SegmentSummary (presentation DTO)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `segment_id` | `str` | Segment identifier |
+| `segment_index` | `int` | Segment order in project |
+| `start_time_seconds` | `float` | Segment start time |
+| `end_time_seconds` | `float` | Segment end time |
+| `effective_detection_mode` | `str` | `full` or `audio_only` for this segment |
+| `fallback_reason` | `str \| None` | `TOGGLE_DISABLED` or `RUNTIME_UNAVAILABLE` when audio-only |
+| `detection_signals` | `list[str]` | Signal channels contributing to boundary (visual/audio-energy/audio-classifier) |
+| `detection_confidence` | `float` | Overall detection confidence |
 
 ---
 
@@ -121,6 +136,8 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 | `selected_segment_id` | `str \| None` | Currently selected segment |
 | `cloud_enrichment_available` | `bool` | Whether optional cloud enrichment is currently reachable |
 | `mapping_fallback_mode` | `bool` | True when local-only fallback mapping is active |
+| `detection_mode` | `str` | `full` or `audio_only` detection mode used for current segments |
+| `reduced_accuracy_notice` | `str \| None` | FR-012 notice carried forward when segments were produced in audio-only fallback mode |
 | `processing_state` | `ProcessingState` | Current workflow state for command gating |
 
 | Command | Parameters | Effect |
@@ -157,9 +174,64 @@ Each screen corresponds to a Flet view + view-model pair. The view-model exposes
 |---------|-----------|--------|
 | `start_upload()` | — | Begin batch upload (enabled only in `READY_FOR_UPLOAD` with mappings below review-threshold explicitly verified and finalized metadata) |
 | `pause_upload()` | — | Pause after current upload |
-| `retry_failed(upload_record_id)` | str | Retry a specific failed upload |
+| `retry_failed(upload_record_id)` | str | Retry a specific failed upload with deterministic two-path handling: reset `retry_count` for this manual cycle, resume from persisted `resumable_upload_uri` + `bytes_uploaded` when valid, otherwise persist reset fields/reason and restart from byte 0 |
 | `create_playlist(title)` | str | Create YouTube playlist |
 | `open_youtube(upload_record_id)` | str | Open uploaded video URL in browser |
+
+#### SegmentPreview (presentation DTO)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `segment_id` | `str` | Segment identifier |
+| `segment_index` | `int` | Segment order in project |
+| `thumbnail_path` | `str` | Representative thumbnail image path |
+| `start_time_seconds` | `float` | Segment start time |
+| `end_time_seconds` | `float` | Segment end time |
+| `effective_detection_mode` | `str` | `full` or `audio_only` for this segment |
+| `fallback_reason` | `str \| None` | `TOGGLE_DISABLED` or `RUNTIME_UNAVAILABLE` when audio-only |
+| `detection_signals` | `list[str]` | Signal channels contributing to boundary (visual/audio-energy/audio-classifier) |
+| `detection_confidence` | `float` | Overall detection confidence |
+
+#### UploadRecordView (presentation DTO)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Upload record ID |
+| `segment_id` | `str` | Related segment ID |
+| `segment_index` | `int` | Segment display order |
+| `segment_title` | `str` | Final mapped title |
+| `upload_status` | `UploadStatus` | Current upload state |
+| `youtube_url` | `str \| None` | Watch URL when uploaded |
+| `bytes_uploaded` | `int` | Bytes uploaded so far |
+| `total_bytes` | `int` | Exported file size |
+| `retry_count` | `int` | Retry attempts used |
+| `has_resumable_uri` | `bool` | Whether resumable session URI exists |
+| `failure_kind` | `str \| None` | Structured failure category for the latest attempt |
+| `session_invalidated_at_utc` | `datetime \| None` | Timestamp when resumable session was invalidated |
+| `restart_from_zero` | `bool` | True when recovery path restarted upload from byte 0 |
+| `error_detail` | `str \| None` | Last error text |
+
+#### QuotaStateView (presentation DTO)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `daily_limit` | `int` | Daily upload quota limit |
+| `daily_used` | `int` | Quota units consumed today |
+| `reset_timestamp_utc` | `datetime` | Next reset timestamp (UTC) |
+| `uploads_remaining_today` | `int` | Estimated remaining uploads today |
+
+#### ResumeInfo (presentation DTO)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `last_completed_stage` | `PipelineStage \| None` | Last successfully completed stage |
+| `resumable_stage` | `PipelineStage \| None` | Stage where resume can continue |
+| `input_changes_detected` | `bool` | True when source file hashes changed |
+| `config_changes_detected` | `bool` | True when relevant config changed since checkpoint |
+| `model_changes_detected` | `bool` | True when model version changed since checkpoint |
+| `invalidated_stages` | `list[PipelineStage]` | Stages invalidated by input/config/model changes |
+| `invalidation_reasons_by_stage` | `dict[PipelineStage, str]` | Human-readable invalidation reason per stage |
+| `checkpoint_timestamp_utc` | `datetime \| None` | Timestamp of latest relevant checkpoint |
 
 ---
 

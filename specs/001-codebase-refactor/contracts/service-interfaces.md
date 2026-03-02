@@ -142,11 +142,9 @@ class CheckpointStore(Protocol):
     def invalidate(self, project_id: str, stage: PipelineStage,
                    segment_index: int | None = None,
                    cascade: bool = True) -> list[str]:
-        """Invalidate a checkpoint (optionally for one segment) and optionally all downstream checkpoints.
-        Downstream must follow the stage dependency graph (not raw enum order).
-        When segment_index is provided, cascade is scoped to downstream checkpoints for that segment;
-        global checkpoints are invalidated only when required segment contributions become invalid.
-        Returns list of invalidated checkpoint IDs."""
+        """Invalidate checkpoint records selected by caller policy.
+        When cascade=True, caller has already decided downstream targets (e.g., via CheckpointManager DAG logic);
+        the store applies persistence updates only and returns invalidated checkpoint IDs."""
         ...
 
     def clean_completed(self, project_id: str) -> int:
@@ -305,6 +303,7 @@ Abstracts video upload operations.
 ```python
 from typing import Protocol, Callable
 from pathlib import Path
+from datetime import datetime
 
 class UploadService(Protocol):
     """Port for video upload to hosting platform.
@@ -316,10 +315,15 @@ class UploadService(Protocol):
 
     def upload(self, file_path: Path, metadata: UploadMetadata,
                progress_callback: Callable[[int, int], None] | None = None,
-               resumable_uri: str | None = None) -> UploadResult:
+               resumable_uri: str | None = None,
+               bytes_uploaded: int = 0,
+               session_callback: Callable[[str], None] | None = None) -> UploadResult:
         """Upload a video file with metadata.
-        Supports resumable uploads via resumable_uri.
-        progress_callback receives (bytes_uploaded, total_bytes)."""
+        Supports resumable uploads via resumable_uri and bytes_uploaded resume offset.
+        session_callback is invoked once with resumable_uri as soon as the session is created/refreshed.
+        Failure classification is returned via UploadResult.failure_kind.
+        Manual retry-cycle counters are managed by caller orchestration (reset retry_count before each manual retry cycle).
+        progress_callback receives (provider-acknowledged bytes_uploaded, total_bytes)."""
         ...
 
     def create_playlist(self, title: str, description: str = "",
@@ -520,7 +524,18 @@ class UploadResult:
     video_id: str | None
     resumable_uri: str | None
     bytes_uploaded: int
+    failure_kind: str | None   # SESSION_INVALIDATED / NETWORK_TRANSIENT / QUOTA_EXHAUSTED / AUTH_FAILURE / UNKNOWN
+    resume_allowed: bool       # False when restart-from-0 is required
+    restart_from_zero: bool
+    session_invalidated_at_utc: datetime | None
     error_message: str | None
+
+# UploadResult contract rules:
+# - If success=False, failure_kind and error_message MUST be non-null.
+# - If failure_kind=QUOTA_EXHAUSTED and bytes_uploaded>0, resumable_uri MUST be non-null for queued resume.
+# - restart_from_zero indicates a failed attempt that must restart from byte 0 on the next manual retry cycle.
+# - If restart_from_zero=True, success MUST be False, failure_kind MUST be SESSION_INVALIDATED, and error_message MUST be non-null.
+# - If failure_kind=SESSION_INVALIDATED, restart_from_zero MUST be True, session_invalidated_at_utc MUST be non-null, and resume_allowed MUST be False.
 
 @dataclass(frozen=True)
 class DiskSpaceInfo:

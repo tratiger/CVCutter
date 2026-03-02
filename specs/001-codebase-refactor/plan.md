@@ -15,7 +15,7 @@ Full architecture refactor of CVCutter — a concert video splitting, audio sync
 **Testing**: pytest + pytest-cov (≥80% overall, ≥90% domain), pyright (static type checking), ruff (linting)
 **Target Platform**: Windows 10/11 desktop (primary); architecture must not preclude future cross-platform
 **Project Type**: Desktop application (standalone installer)
-**Performance Goals**: 2h 1080p concert in <60 min (GPU) / <150 min (CPU); UI response <500 ms during processing; segment detection must satisfy both SC-002 metrics: visual-audio recall ≥90% and boundary accuracy ≥90% within ±5s, audio-only recall ≥80% and boundary accuracy ≥80% within ±8s
+**Performance Goals**: 2h 1080p concert in <60 min (GPU) / <150 min (CPU); UI response <500 ms during processing; installer launch on clean machine <=5s (SC-007); segment detection must satisfy both SC-002 metrics: visual-audio recall ≥90% and boundary accuracy ≥90% within ±5s, audio-only recall ≥80% and boundary accuracy ≥80% within ±8s
 **Constraints**: Peak memory <4 GB (4K) / <2 GB (1080p); installer bundle <2 GB total model weight; daily YouTube quota ~6 uploads; SC-011 benchmark uses one continuous app runtime interval (no restart), six upload-ready 1080p segments totaling 6–8 GB, minimum sustained uplink 50 Mbps, packet loss <1%, and no more than one transient retry per upload (benchmark condition only; runtime retry policy follows spec edge-case behavior with resumable upload + exponential backoff); excess uploads must auto-resume at PT 00:00 while running or on next launch if closed at reset; all detection fully local (no external APIs); all user-facing UI strings remain Japanese by default
 **Scale/Scope**: Single-user workstation; 1–20 video files per concert; ~5,200 LOC current → estimated 8,000–12,000 LOC refactored across layered packages; 5 primary UI screens (Load, Process, Preview/Map, Upload, Settings)
 
@@ -32,7 +32,7 @@ Full architecture refactor of CVCutter — a concert video splitting, audio sync
 - [x] Design covers deterministic, reproducible processing from recorded inputs and
       persisted metadata, plus structured logs/checkpoints and resume invalidation
       when inputs or configuration change.
-      *Evidence: Checkpoint service with JSON state per pipeline stage; input-hash + config-hash + model-version validation on resume; structured logging with operation ID, timestamps, and decision reasons at every stage transition.*
+      *Evidence: Checkpoint service with JSON state per pipeline stage; input-hash + config-hash + model-version validation on resume; structured logging with operation ID, timestamps, and decision reasons at every stage transition. Config-change boundary resolution is deterministic: segment-scoped stages apply from next segment boundary, stage-scoped operations apply at next stage start.*
 - [x] Core workflows remain local-first; external AI dependencies are optional,
       failure-aware, and manually overridable; design addresses memory-efficient
       processing and validated hardware acceleration use.
@@ -118,7 +118,7 @@ src/cvcutter/
 ├── application/                     # Orchestration — coordinates domain + infra
 │   ├── __init__.py
 │   ├── pipeline.py                  # Main processing pipeline orchestrator
-│   ├── upload_workflow.py           # Upload + quota management workflow
+│   ├── upload_workflow.py           # Upload/quota workflow + playlist assignment + per-upload status/URL propagation
 │   ├── mapping_workflow.py          # Detection → mapping → review workflow
 │   ├── migration_service.py         # Legacy config/state auto-migration
 │   └── checkpoint_manager.py        # Checkpoint validation, invalidation, resume logic
@@ -183,7 +183,7 @@ src/cvcutter/
 │       ├── load_view.py             # File selection and project setup
 │       ├── process_view.py          # Processing progress and controls
 │       ├── preview_view.py          # Segment preview and mapping review
-│       ├── upload_view.py           # Upload status and queue management
+│       ├── upload_view.py           # Per-video upload status/URL display and queue management
 │       └── settings_view.py         # Configuration editing
 │
 └── shared/                          # Cross-cutting utilities (no domain logic)
@@ -195,6 +195,7 @@ src/cvcutter/
 tests/
 ├── conftest.py                      # Shared fixtures (test video stubs, config factories)
 ├── unit/
+│   ├── test_architecture_boundaries.py
 │   ├── domain/
 │   │   ├── test_detection.py
 │   │   ├── test_audio_sync.py
@@ -206,23 +207,47 @@ tests/
 │   │   ├── test_upload_workflow.py
 │   │   ├── test_checkpoint_manager.py
 │   │   ├── test_mapping_workflow.py
+│   │   ├── test_pipeline_resources.py
 │   │   └── test_migration_service.py
-│   └── infrastructure/
+│   ├── infrastructure/
 │       ├── test_json_checkpoint_store.py
 │       ├── test_json_config.py
-│       └── test_ffmpeg_transcoder.py
+│       ├── test_ffmpeg_transcoder.py
+│       └── test_structured_logger.py
+│   └── presentation/
+│       ├── test_viewmodels.py
+│       └── test_async_updates.py
 ├── integration/
 │   ├── test_video_to_export.py      # Load → detect → export pipeline
 │   ├── test_segment_to_mapping.py   # Detect → transcribe → map pipeline
-│   └── test_upload_with_quota.py    # Upload → quota → resume pipeline
-└── contract/
-    ├── test_youtube_contract.py     # YouTube API adapter contract tests
-    ├── test_gemini_contract.py      # Gemini adapter contract tests
-    ├── test_forms_contract.py       # Google Forms adapter contract tests
-    └── test_sheets_contract.py      # Google Sheets adapter contract tests
+│   ├── test_upload_with_quota.py    # Upload → quota → resume pipeline
+│   ├── test_detection_benchmarks.py
+│   ├── test_mapping_benchmarks.py
+│   ├── test_ui_workflow.py
+│   ├── test_installer_bundle.py
+│   ├── test_installer_upgrade.py
+│   ├── test_installer_launch_time.py
+│   ├── test_resource_efficiency.py
+│   ├── test_processing_benchmarks.py
+│   ├── test_edge_cases.py
+│   ├── test_local_only_mode.py
+│   ├── test_artifact_lifecycle.py
+│   ├── test_resume_observability.py
+│   └── test_migration_regeneration.py
+├── contract/
+│   ├── test_core_service_contracts.py
+│   ├── test_video_io_contract.py
+│   ├── test_mapping_service_contracts.py
+│   ├── test_youtube_contract.py     # YouTube API adapter contract tests
+│   ├── test_gemini_contract.py      # Gemini adapter contract tests
+│   ├── test_forms_contract.py       # Google Forms adapter contract tests
+│   └── test_sheets_contract.py      # Google Sheets adapter contract tests
+└── security/
+    └── test_credentials_security.py
 
 tools/
-└── check_module_size.py             # Fails if any module exceeds 1000 LOC
+├── check_module_size.py             # Fails if any module exceeds 1000 LOC
+└── validate_installer.ps1           # Validates clean-machine launch and startup SLA
 ```
 
 **Structure Decision**: Single-project four-layer architecture under `src/cvcutter/` with domain, application, infrastructure, and presentation packages. This enforces the constitution's separation requirements (CA-001) while keeping the project as a single installable Python package. The `domain/` package has zero imports from `infrastructure/` or `presentation/`; all cross-layer communication uses Protocol-based interfaces defined in `domain/services/`.

@@ -50,7 +50,7 @@ As a concert video operator, I want long-running processing jobs to save progres
 
 1. **Given** a processing job that has completed 5 of 12 segments, **When** the application is closed and reopened, **Then** the user is offered the option to resume and processing continues from segment 6.
 2. **Given** a resumed job where the source video file has been modified since the last checkpoint, **When** the user attempts to resume, **Then** the system detects the input change, warns the user, and offers to restart from the beginning.
-3. **Given** a resumed job where configuration (e.g., audio balance, output format) has changed, **When** the user resumes, **Then** the system invalidates affected checkpoints and reprocesses only the segments impacted by the configuration change.
+3. **Given** a resumed job where configuration (e.g., audio balance, output format) has changed, **When** the user resumes, **Then** the system applies changes from the next segment boundary (or next stage start), invalidates affected future checkpoints, and reprocesses only impacted future segments.
 
 ---
 
@@ -119,7 +119,7 @@ As a concert video operator, I want to upload processed and mapped videos to You
 **Acceptance Scenarios**:
 
 1. **Given** 8 processed videos with complete metadata and a daily quota allowing 6 uploads, **When** the user starts batch upload, **Then** the first 6 are uploaded, and the remaining 2 are queued for the next quota reset with a clear status message.
-2. **Given** an upload that fails mid-transfer due to a network error, **When** the upload is retried, **Then** it resumes from where it left off (resumable upload) rather than restarting.
+2. **Given** an upload that fails mid-transfer due to a network error, **When** the upload is retried, **Then** it resumes from where it left off when the resumable session is still valid; if the provider invalidates the resumable session, it restarts from byte 0 with a surfaced diagnostic reason.
 3. **Given** form responses indicating a performer wants their video set to "unlisted", **When** that video is uploaded, **Then** its privacy setting is correctly set to "unlisted".
 4. **Given** completed uploads, **When** the user views the upload status screen, **Then** each video shows its YouTube URL, upload status, and any errors encountered.
 5. **Given** uploads are queued due to daily quota exhaustion, **When** Pacific Time reaches 00:00, **Then** queued uploads resume automatically without requiring metadata remapping.
@@ -216,7 +216,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 
 - **FR-010**: The system MUST accept one or more video files as input and concatenate multi-file recordings into a logical continuous timeline before detection.
 - **FR-011**: The system MUST detect individual performance segments within a concert video using local-only methods (no external API calls for detection).
-- **FR-012**: Performance detection MUST use full visual-audio fusion combining YOLO-based visual scene analysis (person/instrument detection, stage activity) with audio energy analysis and lightweight pre-trained local audio content classification (music/speech/applause). The YOLO visual detection component MUST be user-configurable to disable via a settings toggle for low-spec PCs; when disabled, detection falls back to audio-only mode with stable operation and a user-visible notice of reduced expected boundary accuracy.
+- **FR-012**: Performance detection MUST use full visual-audio fusion combining YOLO-based visual scene analysis (person/instrument detection, stage activity) with audio energy analysis and lightweight pre-trained local audio content classification (music/speech/applause). The YOLO visual detection component MUST be user-configurable to disable via a settings toggle for low-spec PCs; when disabled, detection falls back to audio-only mode with stable operation. A user-visible notice of reduced expected boundary accuracy MUST be shown whenever detection executes in audio-only mode (including toggle-disabled and runtime fallback cases).
 - **FR-013**: The system MUST allow the user to review detected segment boundaries and manually adjust start/end times before export.
 - **FR-014**: The system MUST export each detected segment as a separate video file with configurable output format and quality settings.
 
@@ -251,7 +251,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 
 - **FR-050**: The system MUST upload processed videos to YouTube with metadata (title, description, tags, privacy setting, category) derived from the mapping step.
 - **FR-051**: The system MUST track daily API quota usage and prevent uploads that would exceed the daily limit, queuing excess uploads until the YouTube quota reset point (Pacific Time 00:00).
-- **FR-052**: The system MUST use resumable uploads to handle network interruptions without re-uploading completed portions.
+- **FR-052**: The system MUST use resumable uploads to handle network interruptions without re-uploading completed portions while the resumable session remains valid; if the provider invalidates the resumable session, the system MUST restart from byte 0 and MUST surface the reason in upload diagnostics.
 - **FR-053**: The system MUST support playlist creation and assignment for concert groupings.
 - **FR-054**: The system MUST display upload status for each video (pending, queued, uploading, completed, failed) with YouTube URLs for completed uploads.
 - **FR-055**: Queued uploads MUST resume automatically at the quota reset point (Pacific Time 00:00) while the application is running; if the application is not running at reset time, queued uploads MUST auto-resume on next launch without requiring remapping.
@@ -282,13 +282,13 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 - **Concert Project**: Top-level container for a single concert event. Contains references to source video files, optional external audio, program PDF, form responses, and all derived outputs. Key attributes: project name, event date, venue, source file paths, output directory, processing state.
 - **Source Video**: A raw video file input. Key attributes: file path, duration, resolution, codec, creation timestamp, file hash (for change detection).
 - **External Audio**: An optional high-quality microphone recording to synchronize with the video. Key attributes: file path, duration, format, sample rate, file hash.
-- **Performance Segment**: A detected time range within the concatenated video corresponding to a single musical performance. Key attributes: start time, end time, detection confidence, detection signals used, exported file path (after export).
+- **Performance Segment**: A detected time range within the concatenated video corresponding to a single musical performance. Key attributes: start time, end time, detection confidence, effective detection mode (full/audio-only), detection signals used, fallback reason (if any), exported file path (after export).
 - **Checkpoint**: A snapshot of processing state at a given pipeline stage, persisted as a plain-text JSON file in the app config directory. Key attributes: stage identifier, timestamp, input file hashes, configuration snapshot, output references, validity status.
 - **Program Entry**: A single item from the concert program PDF. Key attributes: performance order number, piece title, composer, performer names, ensemble/instrument.
 - **Music Metadata Dictionary**: Bundled offline reference dataset curated before release for lookup assistance. Key attributes: normalized piece title, composer aliases, performer/ensemble aliases, source revision identifier.
 - **Form Response**: A performer's response from the Google Form. Key attributes: performer name, piece title, privacy preference, display name override, custom description.
 - **Video-Metadata Mapping**: The association between a Performance Segment and a Program Entry (and optionally a Form Response). Key attributes: segment reference, program entry reference, form response reference, match confidence, match method (sequential/transcription/lookup/manual), user-verified flag.
-- **Upload Record**: Tracks the YouTube upload state for a single video. Key attributes: segment reference, YouTube video ID, upload status (pending/queued/uploading/completed/failed), privacy setting, playlist assignment, quota cost, error details.
+- **Upload Record**: Tracks the YouTube upload state for a single video. Key attributes: segment reference, YouTube video ID, upload status (pending/queued/uploading/completed/failed), privacy setting, playlist assignment, quota cost, retry count, resumable upload URI, bytes uploaded, structured failure kind, session-invalidation timestamp, restart-from-zero decision, and error details.
 
 ## Constitution Alignment *(mandatory)*
 
@@ -296,7 +296,7 @@ As a concert video operator working with 4K multi-hour recordings, I want the sy
 
 - **CA-002 Test-First Delivery (NON-NEGOTIABLE)**: Each component must be developed test-first. Unit tests for domain logic (detection algorithms, audio sync, mapping heuristics) must achieve ≥90% line coverage. Integration tests must cover cross-module workflows: video-load-to-segment-export, segment-to-metadata-mapping, and upload-with-quota-management. Regression tests must be added for every bug discovered during development.
 
-- **CA-003 Deterministic Processing, Observability & Resume**: Video segmentation must produce identical segment boundaries given the same input video, configuration, and model versions. All processing steps must emit structured log entries with timestamps, operation identifiers, and input/output references. The checkpoint system (FR-040–FR-043) directly implements the resume requirement. Checkpoints are invalidated when input file hashes, configuration values, or model versions change.
+- **CA-003 Deterministic Processing, Observability & Resume**: Video segmentation must produce identical segment boundaries given the same input video, configuration, and model versions. All processing steps must emit structured log entries with timestamps, operation identifiers, and input/output references. The checkpoint system (FR-040–FR-047) directly implements the resume requirement. Checkpoints are invalidated when input file hashes, configuration values, or model versions change.
 
 - **CA-004 Local-First Execution**: Performance detection, audio synchronization, speech transcription, and segment export must execute entirely locally. Gemini AI for PDF parsing and form matching is optional and failure-aware: if unavailable, the system falls back to local heuristics (sequential matching, keyword extraction). All external-service calls are behind interfaces that can be disabled or manually overridden. GPU acceleration is opportunistic with CPU fallback. Memory-efficient streaming is required for large files.
 

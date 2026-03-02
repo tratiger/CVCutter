@@ -72,6 +72,7 @@ CREATED → CONCATENATING → DETECTING → SYNCING_AUDIO → READY_FOR_EXPORT �
 **Execution Note**: `DETECTING` and `SYNCING_AUDIO` are independent stages in the checkpoint dependency graph; this transition order is a serialized UI/runtime display sequence, and invalidation/resume behavior follows the dependency graph defined below.
 **Resume Regression Note**: When checkpoints are invalidated, `ProcessingState` regresses to the earliest invalidated execution stage required for deterministic replay (while keeping completed, unaffected stages intact).
 **Pause/Failure Recovery Note**: `resume_processing()` transitions `PAUSED` (or recoverable `FAILED`) projects to the earliest resumable checkpoint stage; `start_processing()` transitions `PAUSED`/`FAILED` projects to `CREATED` for full restart.
+**Upload Completion Note**: When `ProcessingState=UPLOADING`, the project transitions to `COMPLETED` when all upload records are `COMPLETED`; if any upload record remains terminal `FAILED` after retries, the project transitions to `FAILED` until `retry_failed()` re-enters `UPLOADING`.
 
 ---
 
@@ -129,7 +130,9 @@ A detected time range corresponding to a single musical performance.
 | `start_time_seconds` | `float` | ≥0 | Start time in concatenated timeline |
 | `end_time_seconds` | `float` | > start_time | End time in concatenated timeline |
 | `detection_confidence` | `float` | 0.0–1.0 | Overall detection confidence |
+| `effective_detection_mode` | `str` | `full` or `audio_only` | Actual detection mode used to produce this segment |
 | `detection_signals` | `list[DetectionSignal]` | ≥1 | Signals that contributed to detection |
+| `fallback_reason` | `str \| None` | optional enum | TOGGLE_DISABLED / RUNTIME_UNAVAILABLE when mode is audio-only |
 | `exported_file_path` | `Path \| None` | optional | Path to exported video file |
 | `export_status` | `ExportStatus` | enum | NOT_EXPORTED / EXPORTING / EXPORTED / FAILED |
 | `user_adjusted` | `bool` | default False | Whether user manually adjusted boundaries |
@@ -138,6 +141,10 @@ A detected time range corresponding to a single musical performance.
 - `end_time_seconds` must be strictly greater than `start_time_seconds`
 - `end_time_seconds - start_time_seconds` ≥ `min_duration_seconds` config value (default 30s)
 - `segment_index` values must be unique and sequential within a project
+- `effective_detection_mode` must be `full` or `audio_only`
+- `fallback_reason` must be populated when `effective_detection_mode=audio_only`
+- When `effective_detection_mode=full` and `user_adjusted=False`, `detection_signals` must include VISUAL_YOLO, AUDIO_ENERGY, and AUDIO_CLASSIFIER signal types.
+- When `effective_detection_mode=audio_only`, `detection_signals` must not include VISUAL_YOLO signals.
 
 **Manual Split Rules**:
 - `split_segment(segment_id, split_time)` creates two segments with new UUIDs and reassigns sequential `segment_index` values from the split point onward.
@@ -307,21 +314,39 @@ YouTube upload state for a single video segment.
 | `privacy_setting` | `PrivacySetting` | enum | PUBLIC / UNLISTED / PRIVATE |
 | `playlist_id` | `str \| None` | optional | Target YouTube playlist ID |
 | `quota_cost` | `int` | default 1600 | Estimated quota units for this upload |
-| `retry_count` | `int` | default 0, max 5 | Number of retry attempts |
+| `retry_count` | `int` | default 0, max 5 retries | Number of automatic retry attempts after the initial upload attempt |
 | `error_detail` | `str \| None` | optional | Last error message |
 | `resumable_upload_uri` | `str \| None` | optional | YouTube resumable upload URI |
 | `bytes_uploaded` | `int` | default 0 | Bytes uploaded so far (for resume) |
+| `failure_kind` | `str \| None` | optional enum | SESSION_INVALIDATED / NETWORK_TRANSIENT / QUOTA_EXHAUSTED / AUTH_FAILURE / UNKNOWN |
+| `session_invalidated_at_utc` | `datetime \| None` | optional | Timestamp when session invalidation was detected |
+| `restart_from_zero` | `bool` | default False | Whether recovery decision restarted upload from byte 0 |
 | `youtube_url` | `str \| None` | computed | Full YouTube watch URL |
 | `uploaded_at` | `datetime \| None` | optional | Upload completion timestamp |
+
+**Validation Rules**:
+- `bytes_uploaded` must be monotonic non-decreasing while `upload_status=UPLOADING` and must not exceed the exported file size.
+- When a resumable session is active, `resumable_upload_uri` must be present and `bytes_uploaded` must be persisted after acknowledged upload chunks.
+- On retry, resume from persisted `bytes_uploaded` when `resumable_upload_uri` is still valid; if invalid/expired, clear URI, reset `bytes_uploaded` to 0, set `restart_from_zero=True`, and restart from 0 with `error_detail` updated.
+- `failure_kind` must classify every failed upload attempt, and failed attempts must include `error_detail`.
+- If `failure_kind=SESSION_INVALIDATED`, then `session_invalidated_at_utc` must be set and `restart_from_zero=True`.
+- If `restart_from_zero=True`, then `failure_kind` must be `SESSION_INVALIDATED` and `error_detail` must be non-null.
+- `retry_count` increments once per failed automatic upload attempt before the next retry attempt begins.
+- The initial upload attempt does not increment `retry_count`; first retry failure sets `retry_count=1`.
+- On `FAILED → PENDING` manual retry transition, `retry_count` must reset to 0 while preserving `resumable_upload_uri` + `bytes_uploaded` only when resume remains allowed.
+- On `QUEUED → PENDING` quota-reset transition, `retry_count` must reset to 0 before upload resumes.
+- On `QUEUED → PENDING` quota-reset transition, `resumable_upload_uri` + `bytes_uploaded` must be preserved unless a session-invalidated condition is detected.
 
 **State Transitions**:
 ```text
 PENDING → UPLOADING → COMPLETED
 PENDING → QUEUED (quota exhausted)
+UPLOADING → UPLOADING (automatic retry; retry_count++)
 UPLOADING → FAILED (network error after max retries)
-UPLOADING → QUEUED (quota exhausted mid-upload)
-QUEUED → PENDING (quota reset)
-FAILED → PENDING (manual retry)
+UPLOADING → FAILED (session invalidated/auth failure requiring manual retry)
+UPLOADING → QUEUED (quota exhausted mid-upload; preserve resumable_upload_uri + bytes_uploaded)
+QUEUED → PENDING (quota reset; reset retry_count, preserve resume state)
+FAILED → PENDING (manual retry; reset retry_count, then evaluate resume-vs-restart)
 ```
 
 ---
