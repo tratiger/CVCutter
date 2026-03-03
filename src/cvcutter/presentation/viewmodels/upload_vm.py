@@ -76,12 +76,14 @@ class UploadViewModel:
         """Begin batch upload and refresh records/quota state."""
         if not self._upload_lock.acquire(blocking=False):
             return
+        upload_result_loaded = False
         try:
             self.is_uploading = True
             self.current_operation = "アップロードを開始しています..."
             self.errors.clear()
             try:
                 self.upload_records = self.workflow.start_upload(self.project_id)
+                upload_result_loaded = True
             except Exception as exc:
                 self.errors.append(f"アップロード開始に失敗しました: {exc}")
                 self.current_operation = "アップロード開始に失敗しました。"
@@ -92,12 +94,28 @@ class UploadViewModel:
                 self.errors.append(f"クォータ情報の更新に失敗しました: {exc}")
                 self.current_operation = "アップロードは完了しましたがクォータ取得に失敗しました。"
                 return
-            self.current_operation = "アップロード処理を完了しました。"
+            statuses = {record.upload_status for record in self.upload_records}
+            if UploadStatus.FAILED in statuses:
+                self.current_operation = "一部のアップロードが失敗しました。再試行してください。"
+            elif UploadStatus.QUEUED in statuses:
+                self.current_operation = "一部のアップロードはキュー待機中です。"
+            elif statuses & {UploadStatus.PENDING, UploadStatus.UPLOADING}:
+                self.current_operation = "一部のアップロードは処理中です。"
+            elif statuses:
+                self.current_operation = "アップロード処理を完了しました。"
+            else:
+                self.current_operation = "アップロード対象がありません。"
         except Exception as exc:
             self.errors.append(f"アップロード処理に失敗しました: {exc}")
             self.current_operation = "アップロード処理に失敗しました。"
         finally:
-            self.is_uploading = False
+            if upload_result_loaded:
+                self.is_uploading = any(
+                    record.upload_status in {UploadStatus.PENDING, UploadStatus.UPLOADING, UploadStatus.QUEUED}
+                    for record in self.upload_records
+                )
+            else:
+                self.is_uploading = False
             self._upload_lock.release()
 
     def pause(self) -> None:
@@ -109,7 +127,7 @@ class UploadViewModel:
             self.current_operation = "アップロード一時停止に失敗しました。"
             return
         self.is_uploading = False
-        self.current_operation = "アップロードを一時停止しました。"
+        self.current_operation = "アップロード一時停止を要求しました。"
 
     def pause_upload(self) -> None:
         """Alias command matching upload contract naming."""

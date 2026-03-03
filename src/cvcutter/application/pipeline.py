@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from contextlib import suppress
 from functools import partial
 from time import perf_counter
 from typing import TYPE_CHECKING
 
-from cvcutter.application.pipeline_resources import PipelineResourcesMixin
-from cvcutter.infrastructure.logging.structured_logger import (
+from cvcutter.application.pipeline_logging import (
     log_resource_telemetry,
     log_stage_transition,
 )
+from cvcutter.application.pipeline_resources import PipelineResourcesMixin
 from cvcutter.shared.types import (
     ExportStatus,
     PipelineStage,
@@ -29,9 +30,15 @@ if TYPE_CHECKING:
     from cvcutter.domain.detection.detector import CompositeDetector, DetectionFusionConfig
     from cvcutter.domain.models.project import ConcertProject
     from cvcutter.domain.models.segment import PerformanceSegment
+    from cvcutter.domain.services.model_runner import (
+        AudioContentClassifier as AudioContentClassifierRunner,
+    )
+    from cvcutter.domain.services.model_runner import VisualDetectorRunner
     from cvcutter.domain.services.project_store import ProjectStore
     from cvcutter.domain.services.types import ProgressEvent
     from cvcutter.domain.services.video_io import VideoIOService
+    from cvcutter.infrastructure.models.audio_classifier_runner import OnnxAudioClassifierRunner
+    from cvcutter.infrastructure.models.yolo_runner import YoloModelRunner
 
 
 if not TYPE_CHECKING:
@@ -42,6 +49,12 @@ if not TYPE_CHECKING:
         AudioEnergyDetector = None  # type: ignore[assignment]
         CompositeDetector = None  # type: ignore[assignment]
         DetectionFusionConfig = None  # type: ignore[assignment]
+    try:
+        from cvcutter.infrastructure.models.audio_classifier_runner import OnnxAudioClassifierRunner
+        from cvcutter.infrastructure.models.yolo_runner import YoloModelRunner
+    except ImportError:  # pragma: no cover - optional model-runner dependencies.
+        OnnxAudioClassifierRunner = None  # type: ignore[assignment]
+        YoloModelRunner = None  # type: ignore[assignment]
 
 class _PipelinePausedError(Exception):
     """Internal control-flow exception used when pause is requested."""
@@ -56,6 +69,7 @@ class PipelineOrchestrator(PipelineResourcesMixin):
 
     _active_job_lock = threading.Lock()
     _active_job_project_id: str | None = None
+    _active_job_owner: PipelineOrchestrator | None = None
 
     def __init__(
         self,
@@ -63,11 +77,17 @@ class PipelineOrchestrator(PipelineResourcesMixin):
         checkpoint_manager: CheckpointManager,
         project_store: ProjectStore,
         logger: logging.Logger | None = None,
+        audio_classifier_runner_factory: Callable[..., AudioContentClassifierRunner] | None = None,
+        visual_runner_factory: Callable[..., VisualDetectorRunner] | None = None,
     ) -> None:
         self._video_io = video_io
         self._checkpoint_manager = checkpoint_manager
         self._project_store = project_store
         self._logger = logger or logging.getLogger(__name__)
+        self._audio_classifier_runner_factory = (
+            audio_classifier_runner_factory or OnnxAudioClassifierRunner
+        )
+        self._visual_runner_factory = visual_runner_factory or YoloModelRunner
         self._pause_requested = False
         self._cancel_requested = False
         self._active_config_hash: str | None = None
@@ -121,7 +141,7 @@ class PipelineOrchestrator(PipelineResourcesMixin):
     ) -> ConcertProject:
         """Enforce single-active-job execution and dispatch run mode behavior."""
         project_id = self._project_id(project)
-        self._acquire_active_job(project_id)
+        self._acquire_active_job(project_id, self)
         try:
             resolved_resume_decision = resume_decision
             if run_mode == "restart":
@@ -165,21 +185,28 @@ class PipelineOrchestrator(PipelineResourcesMixin):
             self._release_active_job(project_id)
 
     @classmethod
-    def _acquire_active_job(cls, project_id: str) -> None:
+    def _acquire_active_job(cls, project_id: str, owner: PipelineOrchestrator) -> None:
         """Guard against concurrent pipeline jobs within the current process."""
         with cls._active_job_lock:
             if cls._active_job_project_id is not None:
                 raise RuntimeError(
                     f"Another pipeline job is already active for project {cls._active_job_project_id}.",
                 )
+            owner._pause_requested = False
+            owner._cancel_requested = False
             cls._active_job_project_id = project_id
+            cls._active_job_owner = owner
 
     @classmethod
     def _release_active_job(cls, project_id: str) -> None:
         """Release the active-job slot for the completed/failed pipeline run."""
         with cls._active_job_lock:
             if cls._active_job_project_id == project_id:
+                if cls._active_job_owner is not None:
+                    cls._active_job_owner._pause_requested = False
+                    cls._active_job_owner._cancel_requested = False
                 cls._active_job_project_id = None
+                cls._active_job_owner = None
 
     def _run_pipeline(
         self,
@@ -674,6 +701,7 @@ class PipelineOrchestrator(PipelineResourcesMixin):
             )
 
         self._cleanup_temporary_artifacts(project, concatenated_path)
+        self._check_control_flags(project, "EXPORT_COMPLETE")
         log_stage_transition(
             self._logger,
             stage.value,
@@ -686,13 +714,21 @@ class PipelineOrchestrator(PipelineResourcesMixin):
 
     def pause(self) -> None:
         """Request pause at the next stage boundary."""
-        self._pause_requested = True
-        self._logger.info("Pipeline pause requested.")
+        with self.__class__._active_job_lock:
+            owner = self.__class__._active_job_owner
+            if owner is None:
+                return
+            owner._pause_requested = True
+            owner._logger.info("Pipeline pause requested.")
 
     def cancel(self) -> None:
         """Request cancellation at the next stage boundary."""
-        self._cancel_requested = True
-        self._logger.info("Pipeline cancellation requested.")
+        with self.__class__._active_job_lock:
+            owner = self.__class__._active_job_owner
+            if owner is None:
+                return
+            owner._cancel_requested = True
+            owner._logger.info("Pipeline cancellation requested.")
 
     def _transition_state(self, project: ConcertProject, target: ProcessingState) -> None:
         """Transition processing state and persist project snapshots."""
@@ -755,5 +791,10 @@ class PipelineOrchestrator(PipelineResourcesMixin):
             decision="failure",
             decision_reason=str(exc),
         )
-        self._logger.exception("Pipeline failed at %s: %s", marker, exc)
+        self._logger.error(
+            "Pipeline failed at %s: %s",
+            marker,
+            exc,
+            exc_info=sys.exc_info()[0] is not None,
+        )
 

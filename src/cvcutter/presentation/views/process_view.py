@@ -50,19 +50,25 @@ def build_process_view(vm: ProcessViewModel, page: ft.Page | None = None) -> ft.
             for segment in vm.detected_segments
         ]
         start_button.disabled = vm.is_processing
-        resume_button.disabled = vm.is_processing
+        resume_button.disabled = vm.is_processing or not vm.is_resumable
         pause_button.disabled = not vm.is_processing
         cancel_button.disabled = not vm.is_processing
         if page is not None:
             page.update()
 
-    async def run_start() -> None:
-        await asyncio.to_thread(vm.start_processing)
+    async def _run_with_refresh(command) -> None:
+        task = asyncio.create_task(asyncio.to_thread(command))
+        while not task.done():
+            refresh()
+            await asyncio.sleep(0.1)
+        await task
         refresh()
 
+    async def run_start() -> None:
+        await _run_with_refresh(vm.start_processing)
+
     async def run_resume() -> None:
-        await asyncio.to_thread(vm.resume_processing)
-        refresh()
+        await _run_with_refresh(vm.resume_processing)
 
     def on_start(_: ft.ControlEvent) -> None:
         if vm.is_processing:
@@ -74,7 +80,7 @@ def build_process_view(vm: ProcessViewModel, page: ft.Page | None = None) -> ft.
         page.run_task(run_start)
 
     def on_resume(_: ft.ControlEvent) -> None:
-        if vm.is_processing:
+        if vm.is_processing or not vm.is_resumable:
             return
         if page is None:
             vm.resume_processing()

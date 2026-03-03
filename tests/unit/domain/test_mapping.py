@@ -257,3 +257,31 @@ def test_pdf_normalization_generates_unique_entry_ids_for_duplicate_order_number
 
     assert len(entries) == 2
     assert len({entry.id for entry in entries}) == 2
+
+
+def test_form_matching_can_select_entry_outside_sequential_candidate_set() -> None:
+    entries = [
+        _entry(1, title="Piece A", performers=["Performer A"]),
+        _entry(2, title="Piece B", performers=["Performer B"]),
+    ]
+    segment = _segment(0)
+    response = FormResponse(
+        id="form-1",
+        performer_name="Performer B",
+        piece_title="Piece B",
+        privacy_preference=PrivacySetting.PUBLIC,
+    )
+    mapper = CompositeMapper(
+        minimum_match_confidence=0.0,
+        weights=MappingWeights(sequential=0.1, transcription=0.0, lookup=0.0, form=0.9),
+    )
+
+    mapping = mapper.map_segments(
+        segments=[segment],
+        entries=entries,
+        form_responses=[response],
+        transcription_results=[],
+        lookup_service=_StubLookupService(),
+    )[0]
+
+    assert mapping.program_entry_id == "entry-2"

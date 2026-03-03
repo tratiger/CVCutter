@@ -46,6 +46,17 @@ class _StubAudioClassifierChannel:
         return list(self.signals)
 
 
+class _FailingAudioClassifierChannel:
+    def classify_segments(
+        self,
+        audio_path: Path,
+        sample_rate: int = 22050,
+        window_seconds: float = 1.0,
+    ) -> list[DetectionSignal]:
+        del audio_path, sample_rate, window_seconds
+        raise RuntimeError("classifier boom")
+
+
 @dataclass
 class _StubVisualChannel:
     signals: list[DetectionSignal]
@@ -166,6 +177,93 @@ def test_visual_detector_tracks_person_count_and_instrument_presence() -> None:
     assert first.signal_type == SignalType.VISUAL_YOLO
     assert first.metadata["person_count_max"] >= 1
     assert first.metadata["instrument_present"] is True
+
+
+def test_visual_detector_confidence_ignores_irrelevant_classes() -> None:
+    def frame_sampler(_video_path: Path, _fps: float) -> list[VideoFrame]:
+        return [
+            VideoFrame(data=np.zeros((8, 8, 3), dtype=np.uint8), timestamp_seconds=float(i), frame_index=i)
+            for i in range(3)
+        ]
+
+    class _IrrelevantHighConfidenceRunner:
+        def detect(self, frame: VideoFrame) -> list[Detection]:
+            if frame.frame_index in {0, 1}:
+                return [
+                    Detection(class_name="car", confidence=0.99, bbox=(0.0, 0.0, 1.0, 1.0)),
+                    Detection(class_name="person", confidence=0.5, bbox=(0.1, 0.1, 0.4, 0.9)),
+                ]
+            return []
+
+        def model_version(self) -> str:
+            return "irrelevant-high-confidence"
+
+    detector = VisualActivityDetector(
+        model_runner=_IrrelevantHighConfidenceRunner(),
+        frame_sampler=frame_sampler,
+    )
+
+    signals = detector.detect_activity(Path("dummy.mp4"), fps=1.0)
+
+    assert signals
+    assert signals[0].confidence == pytest.approx(0.5)
+
+
+def test_visual_detector_uses_run_local_sample_step_for_end_time() -> None:
+    def frame_sampler(_video_path: Path, _fps: float) -> list[VideoFrame]:
+        return [
+            VideoFrame(data=np.zeros((8, 8, 3), dtype=np.uint8), timestamp_seconds=0.0, frame_index=0),
+            VideoFrame(data=np.zeros((8, 8, 3), dtype=np.uint8), timestamp_seconds=10.0, frame_index=1),
+            VideoFrame(data=np.zeros((8, 8, 3), dtype=np.uint8), timestamp_seconds=11.0, frame_index=2),
+        ]
+
+    class _SingleLateFrameRunner:
+        def detect(self, frame: VideoFrame) -> list[Detection]:
+            if frame.frame_index == 2:
+                return [Detection(class_name="person", confidence=0.8, bbox=(0.1, 0.1, 0.4, 0.9))]
+            return []
+
+        def model_version(self) -> str:
+            return "single-late-frame"
+
+    detector = VisualActivityDetector(
+        model_runner=_SingleLateFrameRunner(),
+        frame_sampler=frame_sampler,
+    )
+
+    signals = detector.detect_activity(Path("dummy.mp4"), fps=1.0)
+
+    assert signals
+    assert signals[0].start_time_seconds == pytest.approx(11.0)
+    assert signals[0].end_time_seconds == pytest.approx(12.0)
+
+
+def test_visual_detector_uses_latest_time_delta_for_irregular_active_run_end_time() -> None:
+    def frame_sampler(_video_path: Path, _fps: float) -> list[VideoFrame]:
+        return [
+            VideoFrame(data=np.zeros((8, 8, 3), dtype=np.uint8), timestamp_seconds=0.0, frame_index=0),
+            VideoFrame(data=np.zeros((8, 8, 3), dtype=np.uint8), timestamp_seconds=10.0, frame_index=1),
+            VideoFrame(data=np.zeros((8, 8, 3), dtype=np.uint8), timestamp_seconds=11.0, frame_index=2),
+        ]
+
+    class _AlwaysActiveRunner:
+        def detect(self, frame: VideoFrame) -> list[Detection]:
+            del frame
+            return [Detection(class_name="person", confidence=0.9, bbox=(0.1, 0.1, 0.4, 0.9))]
+
+        def model_version(self) -> str:
+            return "always-active-irregular"
+
+    detector = VisualActivityDetector(
+        model_runner=_AlwaysActiveRunner(),
+        frame_sampler=frame_sampler,
+    )
+
+    signals = detector.detect_activity(Path("dummy.mp4"), fps=1.0)
+
+    assert signals
+    assert signals[0].start_time_seconds == pytest.approx(0.0)
+    assert signals[0].end_time_seconds == pytest.approx(12.0)
 
 
 def test_composite_detector_fuses_multimodal_channels_and_splits_on_transition() -> None:
@@ -308,6 +406,182 @@ def test_composite_detector_yolo_disabled_falls_back_to_audio_only() -> None:
         all(signal.signal_type != SignalType.VISUAL_YOLO for signal in segment.detection_signals)
         for segment in segments
     )
+
+
+def test_composite_detector_treats_empty_visual_channel_as_audio_only_fallback() -> None:
+    detector = CompositeDetector(
+        visual_detector=_StubVisualChannel(signals=[]),
+        audio_energy_detector=_StubAudioEnergyChannel(
+            signals=[
+                DetectionSignal(
+                    signal_type=SignalType.AUDIO_ENERGY,
+                    confidence=0.9,
+                    start_time_seconds=0.0,
+                    end_time_seconds=40.0,
+                    metadata={},
+                ),
+            ],
+        ),
+        audio_classifier=_StubAudioClassifierChannel(signals=[]),
+        config=DetectionFusionConfig(min_segment_duration_seconds=10.0),
+    )
+
+    segments = detector.detect(
+        audio_path=Path("audio.wav"),
+        video_path=Path("video.mp4"),
+        config=ProjectConfig(min_segment_duration_seconds=10.0, enable_yolo_detection=True),
+    )
+
+    assert segments
+    assert all(segment.effective_detection_mode == "audio_only" for segment in segments)
+    assert all(segment.fallback_reason == "YOLO_NO_ACTIVITY" for segment in segments)
+
+
+def test_composite_detector_classifier_only_channel_can_start_segments() -> None:
+    detector = CompositeDetector(
+        visual_detector=None,
+        audio_energy_detector=_StubAudioEnergyChannel(signals=[]),
+        audio_classifier=_StubAudioClassifierChannel(
+            signals=[
+                DetectionSignal(
+                    signal_type=SignalType.AUDIO_CLASSIFIER,
+                    confidence=0.95,
+                    start_time_seconds=0.0,
+                    end_time_seconds=40.0,
+                    metadata={"label": "music"},
+                ),
+            ],
+        ),
+        config=DetectionFusionConfig(min_segment_duration_seconds=10.0),
+    )
+
+    segments = detector.detect(
+        audio_path=Path("audio.wav"),
+        video_path=Path("video.mp4"),
+        config=ProjectConfig(min_segment_duration_seconds=10.0, enable_yolo_detection=False),
+    )
+
+    assert segments
+    assert all(segment.effective_detection_mode == "audio_only" for segment in segments)
+
+
+def test_composite_detector_marks_mode_per_segment_when_visual_is_partial() -> None:
+    detector = CompositeDetector(
+        visual_detector=_StubVisualChannel(
+            signals=[
+                DetectionSignal(
+                    signal_type=SignalType.VISUAL_YOLO,
+                    confidence=0.8,
+                    start_time_seconds=30.0,
+                    end_time_seconds=50.0,
+                    metadata={},
+                ),
+            ],
+        ),
+        audio_energy_detector=_StubAudioEnergyChannel(
+            signals=[
+                DetectionSignal(
+                    signal_type=SignalType.AUDIO_ENERGY,
+                    confidence=0.9,
+                    start_time_seconds=0.0,
+                    end_time_seconds=20.0,
+                    metadata={},
+                ),
+                DetectionSignal(
+                    signal_type=SignalType.AUDIO_ENERGY,
+                    confidence=0.9,
+                    start_time_seconds=30.0,
+                    end_time_seconds=50.0,
+                    metadata={},
+                ),
+            ],
+        ),
+        audio_classifier=_StubAudioClassifierChannel(signals=[]),
+        config=DetectionFusionConfig(
+            start_threshold=0.5,
+            stop_threshold=0.35,
+            transition_hold_seconds=1.0,
+            merge_gap_seconds=0.5,
+            min_segment_duration_seconds=5.0,
+        ),
+    )
+
+    segments = detector.detect(
+        audio_path=Path("audio.wav"),
+        video_path=Path("video.mp4"),
+        config=ProjectConfig(min_segment_duration_seconds=5.0, enable_yolo_detection=True),
+    )
+
+    assert len(segments) == 2
+    assert segments[0].effective_detection_mode == "audio_only"
+    assert segments[1].effective_detection_mode == "full"
+
+
+def test_composite_detector_ignores_inactive_energy_weight_outside_energy_intervals() -> None:
+    detector = CompositeDetector(
+        visual_detector=None,
+        audio_energy_detector=_StubAudioEnergyChannel(
+            signals=[
+                DetectionSignal(
+                    signal_type=SignalType.AUDIO_ENERGY,
+                    confidence=0.4,
+                    start_time_seconds=0.0,
+                    end_time_seconds=1.0,
+                    metadata={},
+                ),
+            ],
+        ),
+        audio_classifier=_StubAudioClassifierChannel(
+            signals=[
+                DetectionSignal(
+                    signal_type=SignalType.AUDIO_CLASSIFIER,
+                    confidence=0.95,
+                    start_time_seconds=10.0,
+                    end_time_seconds=40.0,
+                    metadata={"label": "music"},
+                ),
+            ],
+        ),
+        config=DetectionFusionConfig(min_segment_duration_seconds=5.0),
+    )
+
+    segments = detector.detect(
+        audio_path=Path("audio.wav"),
+        video_path=Path("video.mp4"),
+        config=ProjectConfig(min_segment_duration_seconds=5.0, enable_yolo_detection=False),
+    )
+
+    assert segments
+    assert segments[0].start_time_seconds >= 10.0
+    assert segments[0].effective_detection_mode == "audio_only"
+
+
+def test_composite_detector_classifier_failure_falls_back_to_remaining_channels() -> None:
+    detector = CompositeDetector(
+        visual_detector=None,
+        audio_energy_detector=_StubAudioEnergyChannel(
+            signals=[
+                DetectionSignal(
+                    signal_type=SignalType.AUDIO_ENERGY,
+                    confidence=0.9,
+                    start_time_seconds=0.0,
+                    end_time_seconds=40.0,
+                    metadata={},
+                ),
+            ],
+        ),
+        audio_classifier=_FailingAudioClassifierChannel(),
+        config=DetectionFusionConfig(min_segment_duration_seconds=10.0),
+    )
+
+    segments = detector.detect(
+        audio_path=Path("audio.wav"),
+        video_path=Path("video.mp4"),
+        config=ProjectConfig(min_segment_duration_seconds=10.0, enable_yolo_detection=False),
+    )
+
+    assert segments
+    assert all(segment.effective_detection_mode == "audio_only" for segment in segments)
 
 
 def test_composite_detector_transition_recovers_when_score_returns_above_stop_threshold() -> None:

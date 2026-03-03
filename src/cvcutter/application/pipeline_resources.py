@@ -12,9 +12,9 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from cvcutter.application.pipeline_logging import log_stage_transition
 from cvcutter.domain.models.checkpoint import Checkpoint
 from cvcutter.domain.services.types import AudioMixConfig, DiskSpaceInfo, ProgressEvent
-from cvcutter.infrastructure.logging.structured_logger import log_stage_transition
 from cvcutter.shared.hashing import compute_file_hash
 from cvcutter.shared.types import CheckpointStatus, PipelineStage
 
@@ -27,10 +27,12 @@ if TYPE_CHECKING:
     from cvcutter.domain.detection.visual_detector import VisualActivityDetector
     from cvcutter.domain.models.project import ConcertProject
     from cvcutter.domain.models.segment import PerformanceSegment
+    from cvcutter.domain.services.model_runner import (
+        AudioContentClassifier as AudioContentClassifierRunner,
+    )
+    from cvcutter.domain.services.model_runner import VisualDetectorRunner
     from cvcutter.domain.services.project_store import ProjectStore
     from cvcutter.domain.services.video_io import VideoIOService
-    from cvcutter.infrastructure.models.audio_classifier_runner import OnnxAudioClassifierRunner
-    from cvcutter.infrastructure.models.yolo_runner import YoloModelRunner
 
 try:
     from cvcutter.domain.audio.sync import compute_sync_offset
@@ -51,23 +53,14 @@ if not TYPE_CHECKING:
         AudioEnergyDetector = None  # type: ignore[assignment]
         VisualActivityDetector = None  # type: ignore[assignment]
 
-    try:
-        from cvcutter.infrastructure.models.audio_classifier_runner import OnnxAudioClassifierRunner
-    except Exception:  # pragma: no cover - optional runtime dependency/model.
-        OnnxAudioClassifierRunner = None  # type: ignore[assignment]
-
-    try:
-        from cvcutter.infrastructure.models.yolo_runner import YoloModelRunner
-    except Exception:  # pragma: no cover - optional runtime dependency/model.
-        YoloModelRunner = None  # type: ignore[assignment]
-
-
 class PipelineResourcesMixin:
     if TYPE_CHECKING:
         _active_config_hash: str | None
+        _audio_classifier_runner_factory: Callable[..., AudioContentClassifierRunner] | None
         _checkpoint_manager: CheckpointManager
         _logger: Any
         _project_store: ProjectStore
+        _visual_runner_factory: Callable[..., VisualDetectorRunner] | None
         _video_io: VideoIOService
 
     def _find_valid_checkpoint(
@@ -359,11 +352,21 @@ class PipelineResourcesMixin:
         """Return deterministic model/version identifiers per stage."""
         if stage == PipelineStage.DETECTION:
             del detector
+            audio_runner_name = (
+                self._callable_name(self._audio_classifier_runner_factory)
+                if self._audio_classifier_runner_factory is not None
+                else "OnnxAudioClassifierRunner"
+            )
+            visual_runner_name = (
+                self._callable_name(self._visual_runner_factory)
+                if self._visual_runner_factory is not None
+                else "YoloModelRunner"
+            )
             return {
                 "composite_detector": "CompositeDetector",
                 "audio_energy_detector": "AudioEnergyDetector",
-                "audio_classifier": "OnnxAudioClassifierRunner",
-                "visual_detector": "YoloModelRunner",
+                "audio_classifier": audio_runner_name,
+                "visual_detector": visual_runner_name,
                 "audio_classifier_runtime": (
                     "available" if self._audio_classifier_available() else "unavailable"
                 ),
@@ -379,14 +382,14 @@ class PipelineResourcesMixin:
 
     def _build_audio_classifier_channel(self) -> AudioContentClassifier | None:
         """Build domain-level audio classifier channel when ONNX model is available."""
-        if AudioContentClassifier is None or OnnxAudioClassifierRunner is None:
+        if AudioContentClassifier is None or self._audio_classifier_runner_factory is None:
             return None
 
         model_path = self._audio_classifier_model_path()
         if model_path is None:
             return None
         try:
-            runner = OnnxAudioClassifierRunner(model_path=model_path)
+            runner = self._audio_classifier_runner_factory(model_path=model_path)
             return AudioContentClassifier(model_runner=runner)
         except Exception as exc:
             self._logger.warning("Audio classifier unavailable; continuing without classifier channel: %s", exc)
@@ -399,18 +402,31 @@ class PipelineResourcesMixin:
         """Build visual detector channel or return a runtime fallback reason."""
         if not project.config_snapshot.enable_yolo_detection:
             return None, None
-        if VisualActivityDetector is None or YoloModelRunner is None:
+        if VisualActivityDetector is None or self._visual_runner_factory is None:
             return None, "YOLO_RUNTIME_UNAVAILABLE"
 
         model_path = self._yolo_model_path()
         if model_path is None:
             return None, "YOLO_MODEL_NOT_FOUND"
         try:
-            runner = YoloModelRunner(model_path=model_path)
+            runner = self._visual_runner_factory(model_path=model_path)
             return VisualActivityDetector(model_runner=runner), None
         except Exception as exc:
             self._logger.warning("YOLO unavailable at runtime; falling back to audio-only detection: %s", exc)
             return None, str(exc)
+
+    @staticmethod
+    def _callable_name(factory: Callable[..., object]) -> str:
+        import functools
+
+        if isinstance(factory, functools.partial):
+            base_name = PipelineResourcesMixin._callable_name(factory.func)
+            bound_args = ",".join(repr(item) for item in factory.args)
+            bound_kwargs = ",".join(
+                f"{key}={value!r}" for key, value in sorted((factory.keywords or {}).items())
+            )
+            return f"partial({base_name}|{bound_args}|{bound_kwargs})"
+        return getattr(factory, "__name__", factory.__class__.__name__)
 
     @staticmethod
     def _audio_classifier_model_path() -> Path | None:
@@ -455,10 +471,13 @@ class PipelineResourcesMixin:
         return unique_roots
 
     def _audio_classifier_available(self) -> bool:
-        return OnnxAudioClassifierRunner is not None and self._audio_classifier_model_path() is not None
+        return (
+            self._audio_classifier_runner_factory is not None
+            and self._audio_classifier_model_path() is not None
+        )
 
     def _visual_detector_available(self) -> bool:
-        return YoloModelRunner is not None and self._yolo_model_path() is not None
+        return self._visual_runner_factory is not None and self._yolo_model_path() is not None
 
     @staticmethod
     def _detection_mode_counts(segments: list[PerformanceSegment]) -> dict[str, int]:

@@ -242,6 +242,9 @@ def _build_page(page: ft.Page) -> None:
                 summary.end_time_seconds,
                 summary.effective_detection_mode,
                 summary.fallback_reason,
+                summary.detection_confidence,
+                summary.exported_file_path,
+                summary.export_status.value,
             )
             for summary in process_vm.detected_segments
         )
@@ -257,8 +260,10 @@ def _build_page(page: ft.Page) -> None:
                 effective_detection_mode=summary.effective_detection_mode,
                 detection_signals=[],
                 fallback_reason=summary.fallback_reason,
-                exported_file_path=None,
-                export_status=ExportStatus.NOT_EXPORTED,
+                exported_file_path=Path(summary.exported_file_path)
+                if summary.exported_file_path is not None
+                else None,
+                export_status=summary.export_status,
                 user_adjusted=False,
             )
             for summary in process_vm.detected_segments

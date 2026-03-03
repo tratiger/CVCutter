@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from types import MethodType
@@ -31,6 +33,10 @@ if TYPE_CHECKING:
 def _reset_active_job_guard() -> None:
     """Reset process-level pipeline concurrency guard between tests."""
     PipelineOrchestrator._active_job_project_id = None
+    PipelineOrchestrator._active_job_owner = None
+    yield
+    PipelineOrchestrator._active_job_project_id = None
+    PipelineOrchestrator._active_job_owner = None
 
 
 def _make_project(tmp_path: Path, *, output_quality: str = "high") -> ConcertProject:
@@ -448,3 +454,84 @@ def test_config_changes_apply_on_next_segment_boundary(
     orchestrator.run(project)
 
     assert export_qualities == ["high", "low"]
+
+
+def test_stale_cancel_request_does_not_fail_next_pipeline_run(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    orchestrator, _, _, _, _, _ = _build_orchestrator(project)
+
+    orchestrator.cancel()
+    result = orchestrator.run(project)
+
+    assert result.processing_state != ProcessingState.FAILED
+
+
+def test_cancel_from_secondary_instance_targets_active_pipeline_owner(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    owner, _, _, _, _, _ = _build_orchestrator(project)
+    controller, _, _, _, _, _ = _build_orchestrator(project)
+    PipelineOrchestrator._active_job_project_id = str(project.id)
+    PipelineOrchestrator._active_job_owner = owner
+
+    controller.cancel()
+
+    assert owner._cancel_requested is True
+    assert controller._cancel_requested is False
+
+
+def test_cancel_request_after_owner_acquire_is_not_overwritten(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _make_project(tmp_path)
+    owner, _, _, _, _, _ = _build_orchestrator(project)
+    controller, _, _, _, _, _ = _build_orchestrator(project)
+    owner_acquired = threading.Event()
+    saw_cancel: dict[str, bool] = {"value": False}
+
+    original_acquire = PipelineOrchestrator._acquire_active_job.__func__
+
+    def wrapped_acquire(
+        cls: type[PipelineOrchestrator],
+        project_id: str,
+        orchestrator_owner: PipelineOrchestrator,
+    ) -> None:
+        original_acquire(cls, project_id, orchestrator_owner)
+        if orchestrator_owner is owner:
+            owner_acquired.set()
+            time.sleep(0.1)
+
+    def fake_run_pipeline(self: PipelineOrchestrator, run_project, progress_callback=None):
+        del progress_callback
+        saw_cancel["value"] = self._cancel_requested
+        return run_project
+
+    monkeypatch.setattr(PipelineOrchestrator, "_acquire_active_job", classmethod(wrapped_acquire))
+    monkeypatch.setattr(PipelineOrchestrator, "_run_pipeline", fake_run_pipeline)
+
+    run_thread = threading.Thread(target=owner.run, args=(project,))
+    run_thread.start()
+    assert owner_acquired.wait(timeout=2.0)
+    controller.cancel()
+    run_thread.join(timeout=2.0)
+
+    assert saw_cancel["value"] is True
+
+
+def test_cancel_during_last_export_segment_is_honored_before_completion(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    owner, video_io, _, _, _, _ = _build_orchestrator(project)
+    controller, _, _, _, _, _ = _build_orchestrator(project)
+    original_export = video_io.export_segment.side_effect
+
+    def _export_with_late_cancel(**kwargs):
+        exported = original_export(**kwargs)
+        if "segment_001" in str(kwargs["output_path"]):
+            controller.cancel()
+        return exported
+
+    video_io.export_segment.side_effect = _export_with_late_cancel
+
+    result = owner.run(project)
+
+    assert result.processing_state == ProcessingState.FAILED

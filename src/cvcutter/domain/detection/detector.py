@@ -117,7 +117,11 @@ class CompositeDetector:
         """Detect performance segments using weighted multimodal fusion."""
         fusion_config = self._config.for_project(config)
         energy_signals = self._detect_audio_energy(audio_path, fusion_config)
-        classifier_signals = self._detect_audio_classifier(audio_path)
+        use_energy = bool(energy_signals)
+        try:
+            classifier_signals = self._detect_audio_classifier(audio_path)
+        except Exception:
+            classifier_signals = []
         use_classifier = bool(classifier_signals)
 
         fallback_reason: str | None = None
@@ -136,8 +140,11 @@ class CompositeDetector:
                 visual_signals = []
                 fallback_reason = "YOLO_UNAVAILABLE"
 
-        use_visual = visual_enabled and fallback_reason is None
-        signals_for_fusion = list(energy_signals) + list(classifier_signals)
+        if visual_enabled and fallback_reason is None and not visual_signals:
+            fallback_reason = "YOLO_NO_ACTIVITY"
+        use_visual = visual_enabled and fallback_reason is None and bool(visual_signals)
+        signals_for_fusion = list(energy_signals) if use_energy else []
+        signals_for_fusion.extend(classifier_signals)
         if use_visual:
             signals_for_fusion.extend(visual_signals)
         if not signals_for_fusion:
@@ -145,6 +152,7 @@ class CompositeDetector:
 
         intervals = self._build_fusion_intervals(
             signals=signals_for_fusion,
+            use_energy=use_energy,
             use_visual=use_visual,
             use_classifier=use_classifier,
             config=fusion_config,
@@ -156,11 +164,17 @@ class CompositeDetector:
             (start, end) for start, end in merged_ranges if end - start >= minimum_duration
         ]
 
-        mode = "full" if use_visual else "audio_only"
-        effective_reason = None if mode == "full" else (fallback_reason or "YOLO_UNAVAILABLE")
         segments: list[PerformanceSegment] = []
         for segment_index, (start_seconds, end_seconds) in enumerate(bounded_ranges):
-            segment_signals = self._segment_signals(signals_for_fusion, start_seconds, end_seconds, mode)
+            segment_signals = self._segment_signals(signals_for_fusion, start_seconds, end_seconds)
+            has_visual_signal = any(
+                signal.signal_type == SignalType.VISUAL_YOLO
+                for signal in segment_signals
+            )
+            segment_mode = "full" if has_visual_signal else "audio_only"
+            segment_fallback = None if segment_mode == "full" else (fallback_reason or "YOLO_NO_ACTIVITY")
+            for signal in segment_signals:
+                signal.metadata["effective_detection_mode"] = segment_mode
             confidence = self._segment_confidence(intervals, start_seconds, end_seconds)
             segments.append(
                 PerformanceSegment(
@@ -169,9 +183,9 @@ class CompositeDetector:
                     start_time_seconds=start_seconds,
                     end_time_seconds=end_seconds,
                     detection_confidence=confidence,
-                    effective_detection_mode=mode,
+                    effective_detection_mode=segment_mode,
                     detection_signals=segment_signals,
-                    fallback_reason=effective_reason,
+                    fallback_reason=segment_fallback,
                 ),
             )
         return segments
@@ -184,7 +198,7 @@ class CompositeDetector:
         return list(
             self._audio_energy_detector.detect_boundaries_with_signals(
                 audio_path=audio_path,
-                min_duration=config.min_segment_duration_seconds,
+                min_duration=1e-6,
             ),
         )
 
@@ -197,6 +211,7 @@ class CompositeDetector:
         self,
         *,
         signals: list[DetectionSignal],
+        use_energy: bool,
         use_visual: bool,
         use_classifier: bool,
         config: DetectionFusionConfig,
@@ -216,23 +231,26 @@ class CompositeDetector:
             if end_seconds <= start_seconds:
                 continue
             midpoint = (start_seconds + end_seconds) / 2.0
-            energy_score = self._channel_score(signals, midpoint, SignalType.AUDIO_ENERGY)
+            energy_score = self._channel_score(signals, midpoint, SignalType.AUDIO_ENERGY) if use_energy else 0.0
             classifier_score = self._classifier_score(signals, midpoint) if use_classifier else 0.0
             visual_score = self._channel_score(signals, midpoint, SignalType.VISUAL_YOLO) if use_visual else 0.0
+            energy_active = (
+                use_energy and self._channel_has_signal(signals, midpoint, SignalType.AUDIO_ENERGY)
+            )
+            classifier_active = use_classifier and self._classifier_has_signal(signals, midpoint)
+            visual_active = use_visual and self._channel_has_signal(signals, midpoint, SignalType.VISUAL_YOLO)
 
             weighted_sum = (
-                energy_score * config.audio_energy_weight
-                + classifier_score * (config.audio_classifier_weight if use_classifier else 0.0)
-                + visual_score * (config.visual_weight if use_visual else 0.0)
+                energy_score * (config.audio_energy_weight if energy_active else 0.0)
+                + classifier_score * (config.audio_classifier_weight if classifier_active else 0.0)
+                + visual_score * (config.visual_weight if visual_active else 0.0)
             )
-            denominator = config.audio_energy_weight
-            if use_classifier:
+            denominator = config.audio_energy_weight if energy_active else 0.0
+            if classifier_active:
                 denominator += config.audio_classifier_weight
-            if use_visual:
+            if visual_active:
                 denominator += config.visual_weight
-            if denominator <= 0:
-                continue
-            score = float(np.clip(weighted_sum / denominator, 0.0, 1.0))
+            score = 0.0 if denominator <= 0 else float(np.clip(weighted_sum / denominator, 0.0, 1.0))
             intervals.append(
                 _FusionInterval(
                     start_seconds=float(start_seconds),
@@ -332,6 +350,14 @@ class CompositeDetector:
             default=0.0,
         )
 
+    @staticmethod
+    def _channel_has_signal(signals: list[DetectionSignal], time_seconds: float, signal_type: SignalType) -> bool:
+        return any(
+            signal.signal_type == signal_type
+            and signal.start_time_seconds <= time_seconds < signal.end_time_seconds
+            for signal in signals
+        )
+
     def _classifier_score(self, signals: list[DetectionSignal], time_seconds: float) -> float:
         active_scores: list[float] = []
         for signal in signals:
@@ -343,6 +369,14 @@ class CompositeDetector:
             factor = self._classifier_activity_factor(label)
             active_scores.append(signal.confidence * factor)
         return max(active_scores, default=0.0)
+
+    @staticmethod
+    def _classifier_has_signal(signals: list[DetectionSignal], time_seconds: float) -> bool:
+        return any(
+            signal.signal_type == SignalType.AUDIO_CLASSIFIER
+            and signal.start_time_seconds <= time_seconds < signal.end_time_seconds
+            for signal in signals
+        )
 
     @staticmethod
     def _classifier_activity_factor(label: str) -> float:
@@ -381,7 +415,6 @@ class CompositeDetector:
         signals: list[DetectionSignal],
         segment_start: float,
         segment_end: float,
-        mode: str,
     ) -> list[DetectionSignal]:
         clipped_signals: list[DetectionSignal] = []
         for signal in signals:
@@ -390,7 +423,6 @@ class CompositeDetector:
             if overlap_end <= overlap_start:
                 continue
             metadata = dict(signal.metadata)
-            metadata["effective_detection_mode"] = mode
             clipped_signals.append(
                 DetectionSignal(
                     signal_type=signal.signal_type,

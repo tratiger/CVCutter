@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid4
+
+import pytest
 
 from cvcutter.application.upload_workflow import UploadWorkflow
 from cvcutter.domain.models.metadata import VideoMetadataMapping
@@ -23,6 +27,13 @@ from cvcutter.shared.types import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.fixture(autouse=True)
+def _reset_upload_workflow_guard() -> None:
+    """Reset process-level upload-workflow guard state between tests."""
+    UploadWorkflow._is_upload_run_active = False
+    UploadWorkflow._active_upload_owner = None
 
 
 class _MockUploadService:
@@ -629,7 +640,8 @@ def test_quota_queue_clears_restart_from_zero_flags(tmp_path: Path) -> None:
         mappings=[mapping],
         uploads=[failed_record],
     )
-    workflow = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+    checkpoint_manager = _MockCheckpointManager()
+    workflow = UploadWorkflow(upload_service, quota_store, project_store, checkpoint_manager)
     workflow.start_upload(project, [failed_record])
 
     queued = workflow.retry_failed(failed_record.id)
@@ -637,6 +649,7 @@ def test_quota_queue_clears_restart_from_zero_flags(tmp_path: Path) -> None:
     assert queued.upload_status == UploadStatus.QUEUED
     assert queued.restart_from_zero is False
     assert queued.session_invalidated_at_utc is None
+    assert any("status:QUEUED" in checkpoint.output_references for checkpoint in checkpoint_manager.saved)
 
 
 def test_auth_failure_queued_records_resume_after_auth_recovers(tmp_path: Path) -> None:
@@ -722,3 +735,266 @@ def test_quota_exhausted_response_short_circuits_remaining_api_calls(tmp_path: P
     assert len(upload_service.calls) == 1
     assert quota_store.state is not None
     assert quota_store.state.daily_used == quota_store.state.daily_limit
+
+
+def test_upload_workflow_rejects_concurrent_start_upload_calls(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    segment = _make_segment(tmp_path, 0)
+    mapping = _make_mapping(segment, "title-lock")
+    record = _make_record(segment, mapping, UploadStatus.PENDING)
+    upload_service = _MockUploadService({"title-lock": [_success_result("video-lock")]})
+    quota_store = _MockQuotaStateStore(
+        QuotaState(
+            daily_limit=10_000,
+            daily_used=0,
+            reset_timestamp_utc=datetime.now(UTC) + timedelta(hours=1),
+            last_updated=datetime.now(UTC),
+        ),
+    )
+    project_store = _MockProjectStore(
+        project_id=str(project.id),
+        segments=[segment],
+        mappings=[mapping],
+        uploads=[record],
+    )
+    workflow = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+
+    UploadWorkflow._is_upload_run_active = True
+    try:
+        with pytest.raises(RuntimeError, match="already running"):
+            workflow.start_upload(project, [record])
+    finally:
+        UploadWorkflow._is_upload_run_active = False
+
+
+def test_restart_from_zero_failure_clears_stale_resumable_uri(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    segment = _make_segment(tmp_path, 0)
+    mapping = _make_mapping(segment, "title-restart-zero")
+    record = _make_record(segment, mapping, UploadStatus.PENDING)
+    record.resumable_upload_uri = "session://stale"
+    record.bytes_uploaded = 512
+    upload_service = _MockUploadService(
+        {
+            "title-restart-zero": [
+                _failure_result(
+                    failure_kind="UNKNOWN",
+                    resume_allowed=False,
+                    restart_from_zero=True,
+                    bytes_uploaded=256,
+                ),
+            ],
+        },
+    )
+    quota_store = _MockQuotaStateStore(
+        QuotaState(
+            daily_limit=10_000,
+            daily_used=0,
+            reset_timestamp_utc=datetime.now(UTC) + timedelta(hours=1),
+            last_updated=datetime.now(UTC),
+        ),
+    )
+    project_store = _MockProjectStore(
+        project_id=str(project.id),
+        segments=[segment],
+        mappings=[mapping],
+        uploads=[record],
+    )
+    workflow = UploadWorkflow(
+        upload_service,
+        quota_store,
+        project_store,
+        _MockCheckpointManager(),
+        max_retries=0,
+    )
+
+    workflow.start_upload(project, [record])
+
+    assert record.upload_status == UploadStatus.FAILED
+    assert record.failure_kind == "UNKNOWN"
+    assert record.bytes_uploaded == 0
+    assert record.resumable_upload_uri is None
+
+
+def test_quota_reset_scheduler_skips_persistence_when_upload_run_is_active(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    segment = _make_segment(tmp_path, 0)
+    mapping = _make_mapping(segment, "title-scheduler-lock")
+    record = _make_record(segment, mapping, UploadStatus.QUEUED)
+    upload_service = _MockUploadService({"title-scheduler-lock": [_success_result("video-scheduler-lock")]})
+    quota_store = _MockQuotaStateStore(
+        QuotaState(
+            daily_limit=10_000,
+            daily_used=8_000,
+            reset_timestamp_utc=datetime.now(UTC) + timedelta(hours=1),
+            last_updated=datetime.now(UTC),
+        ),
+    )
+    project_store = _MockProjectStore(
+        project_id=str(project.id),
+        segments=[segment],
+        mappings=[mapping],
+        uploads=[record],
+    )
+    workflow = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+
+    UploadWorkflow._is_upload_run_active = True
+    try:
+        result = workflow.run_quota_reset_scheduler(project, [record], now_utc=datetime.now(UTC))
+    finally:
+        UploadWorkflow._is_upload_run_active = False
+
+    assert result[0].id == record.id
+    assert project_store.save_upload_calls == 0
+
+
+def test_resume_queued_on_startup_skips_persistence_when_upload_run_is_active(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    segment = _make_segment(tmp_path, 0)
+    mapping = _make_mapping(segment, "title-startup-lock")
+    record = _make_record(segment, mapping, UploadStatus.QUEUED)
+    upload_service = _MockUploadService({"title-startup-lock": [_success_result("video-startup-lock")]})
+    quota_store = _MockQuotaStateStore(
+        QuotaState(
+            daily_limit=10_000,
+            daily_used=8_000,
+            reset_timestamp_utc=datetime.now(UTC) + timedelta(hours=1),
+            last_updated=datetime.now(UTC),
+        ),
+    )
+    project_store = _MockProjectStore(
+        project_id=str(project.id),
+        segments=[segment],
+        mappings=[mapping],
+        uploads=[record],
+    )
+    workflow = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+
+    UploadWorkflow._is_upload_run_active = True
+    try:
+        result = workflow.resume_queued_on_startup(project)
+    finally:
+        UploadWorkflow._is_upload_run_active = False
+
+    assert result[0].id == record.id
+    assert project_store.save_upload_calls == 0
+
+
+def test_cancel_from_secondary_instance_targets_active_upload_owner(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    segment = _make_segment(tmp_path, 0)
+    mapping = _make_mapping(segment, "title-cancel-owner")
+    record = _make_record(segment, mapping, UploadStatus.PENDING)
+    upload_service = _MockUploadService({"title-cancel-owner": [_success_result("video-cancel-owner")]})
+    quota_store = _MockQuotaStateStore()
+    project_store = _MockProjectStore(
+        project_id=str(project.id),
+        segments=[segment],
+        mappings=[mapping],
+        uploads=[record],
+    )
+    owner = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+    controller = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+    UploadWorkflow._active_upload_owner = owner
+
+    controller.cancel()
+
+    assert owner._cancel_requested is True
+    assert controller._cancel_requested is False
+
+
+def test_cancel_from_secondary_thread_does_not_block_and_stops_next_record(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    segment0 = _make_segment(tmp_path, 0)
+    segment1 = _make_segment(tmp_path, 1)
+    mapping0 = _make_mapping(segment0, "title-cancel-thread-0")
+    mapping1 = _make_mapping(segment1, "title-cancel-thread-1")
+    record0 = _make_record(segment0, mapping0, UploadStatus.PENDING)
+    record1 = _make_record(segment1, mapping1, UploadStatus.PENDING)
+    started = threading.Event()
+    release = threading.Event()
+
+    class _BlockingUploadService(_MockUploadService):
+        def upload(
+            self,
+            file_path: Path,
+            metadata,
+            progress_callback=None,
+            resumable_uri: str | None = None,
+            bytes_uploaded: int = 0,
+            session_callback=None,
+        ) -> UploadResult:
+            started.set()
+            release.wait(timeout=2.0)
+            return super().upload(
+                file_path,
+                metadata,
+                progress_callback=progress_callback,
+                resumable_uri=resumable_uri,
+                bytes_uploaded=bytes_uploaded,
+                session_callback=session_callback,
+            )
+
+    upload_service = _BlockingUploadService(
+        {
+            "title-cancel-thread-0": [_success_result("video-cancel-thread-0")],
+            "title-cancel-thread-1": [_success_result("video-cancel-thread-1")],
+        },
+    )
+    quota_store = _MockQuotaStateStore(
+        QuotaState(
+            daily_limit=10_000,
+            daily_used=0,
+            reset_timestamp_utc=datetime.now(UTC) + timedelta(hours=1),
+            last_updated=datetime.now(UTC),
+        ),
+    )
+    project_store = _MockProjectStore(
+        project_id=str(project.id),
+        segments=[segment0, segment1],
+        mappings=[mapping0, mapping1],
+        uploads=[record0, record1],
+    )
+    owner = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+    controller = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+
+    worker = threading.Thread(target=owner.start_upload, args=(project, [record0, record1]))
+    worker.start()
+    assert started.wait(timeout=2.0)
+
+    started_at = time.perf_counter()
+    controller.cancel()
+    elapsed = time.perf_counter() - started_at
+    release.set()
+    worker.join(timeout=2.0)
+
+    assert elapsed < 1.0
+    assert len(upload_service.calls) == 1
+
+
+def test_reset_quota_if_due_advances_to_future_reset_timestamp(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    segment = _make_segment(tmp_path, 0)
+    mapping = _make_mapping(segment, "title-reset-loop")
+    record = _make_record(segment, mapping, UploadStatus.PENDING)
+    upload_service = _MockUploadService({"title-reset-loop": [_success_result("video-reset-loop")]})
+    quota_store = _MockQuotaStateStore()
+    project_store = _MockProjectStore(
+        project_id=str(project.id),
+        segments=[segment],
+        mappings=[mapping],
+        uploads=[record],
+    )
+    workflow = UploadWorkflow(upload_service, quota_store, project_store, _MockCheckpointManager())
+    now = datetime.now(UTC)
+    stale = QuotaState(
+        daily_limit=10_000,
+        daily_used=0,
+        reset_timestamp_utc=now - timedelta(days=2),
+        last_updated=now - timedelta(days=2),
+    )
+
+    updated, reset_applied = workflow._reset_quota_if_due(stale)
+
+    assert reset_applied is True
+    assert updated.reset_timestamp_utc > now

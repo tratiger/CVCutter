@@ -94,27 +94,53 @@ class CheckpointManager:
             if not stage_checkpoints:
                 continue
 
+            latest_checkpoints: dict[int | None, Checkpoint] = {}
+            for checkpoint in stage_checkpoints:
+                current = latest_checkpoints.get(checkpoint.segment_index)
+                if current is None or checkpoint.created_at > current.created_at:
+                    latest_checkpoints[checkpoint.segment_index] = checkpoint
+            if stage == PipelineStage.EXPORT and any(index is not None for index in latest_checkpoints):
+                latest_checkpoints.pop(None, None)
+
             stage_input_hashes = self._stage_scope_payload(current_input_hashes, stage)
             stage_config = self._stage_scope_payload(current_config, stage)
             stage_model_versions = self._stage_scope_payload(current_model_versions, stage)
+            expected_segment_indices = self._expected_segment_indices(stage_input_hashes)
+            available_segment_indices = {
+                index for index in latest_checkpoints
+                if index is not None
+            }
 
             stage_reason: str | None = None
-            stage_has_valid_checkpoint = False
-            for checkpoint in stage_checkpoints:
-                checkpoint_input_hashes = self._segment_scope_payload(
-                    stage_input_hashes,
-                    checkpoint.segment_index,
-                )
-                reason = self._validation_reason(
-                    checkpoint=checkpoint,
-                    current_input_hashes=checkpoint_input_hashes,
-                    current_config=stage_config,
-                    current_model_versions=stage_model_versions,
-                )
-                if reason is None:
-                    stage_has_valid_checkpoint = True
-                    break
-                stage_reason = reason
+            stage_has_valid_checkpoint = True
+            if stage == PipelineStage.EXPORT and expected_segment_indices:
+                missing_segments = expected_segment_indices - available_segment_indices
+                if missing_segments:
+                    stage_has_valid_checkpoint = False
+                    stage_reason = "missing_segment_checkpoint"
+            ordered_checkpoints = sorted(
+                latest_checkpoints.values(),
+                key=lambda checkpoint: (
+                    checkpoint.segment_index is not None,
+                    checkpoint.segment_index if checkpoint.segment_index is not None else -1,
+                ),
+            )
+            if stage_has_valid_checkpoint:
+                for checkpoint in ordered_checkpoints:
+                    checkpoint_input_hashes = self._segment_scope_payload(
+                        stage_input_hashes,
+                        checkpoint.segment_index,
+                    )
+                    reason = self._validation_reason(
+                        checkpoint=checkpoint,
+                        current_input_hashes=checkpoint_input_hashes,
+                        current_config=stage_config,
+                        current_model_versions=stage_model_versions,
+                    )
+                    if reason is not None:
+                        stage_reason = reason
+                        stage_has_valid_checkpoint = False
+                        break
 
             if stage_has_valid_checkpoint:
                 continue
@@ -256,6 +282,18 @@ class CheckpointManager:
         scoped = payload.get(f"segment:{segment_index}")
         return scoped if isinstance(scoped, dict) else payload
 
+    @staticmethod
+    def _expected_segment_indices(payload: dict[str, Any]) -> set[int]:
+        expected: set[int] = set()
+        for key, value in payload.items():
+            if not key.startswith("segment:") or not isinstance(value, dict):
+                continue
+            try:
+                expected.add(int(key.split(":", 1)[1]))
+            except ValueError:
+                continue
+        return expected
+
     def _validation_reason(
         self,
         checkpoint: Checkpoint,
@@ -286,7 +324,9 @@ class CheckpointManager:
         current_snapshot: dict[str, Any],
     ) -> bool:
         """Compare full or scoped config snapshots for checkpoint validation."""
+        if self._fingerprint(checkpoint_snapshot) == self._fingerprint(current_snapshot):
+            return True
         if set(current_snapshot).issubset(checkpoint_snapshot):
             scoped_snapshot = {key: checkpoint_snapshot[key] for key in current_snapshot}
             return self._fingerprint(scoped_snapshot) == self._fingerprint(current_snapshot)
-        return self._fingerprint(checkpoint_snapshot) == self._fingerprint(current_snapshot)
+        return False

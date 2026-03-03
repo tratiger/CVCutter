@@ -61,6 +61,7 @@ class CompositeMapper:
         sorted_segments = sorted(segments, key=lambda segment: segment.segment_index)
         sorted_entries = sorted(entries, key=lambda entry: entry.order_number)
         entry_by_id = {entry.id: entry for entry in sorted_entries}
+        entry_order = {entry.id: index for index, entry in enumerate(sorted_entries)}
         transcriptions_by_segment = self._coerce_transcriptions(sorted_segments, transcription_results)
         form_matches = match_form_responses(sorted_segments, sorted_entries, form_responses)
         mappings: list[VideoMetadataMapping] = []
@@ -111,7 +112,11 @@ class CompositeMapper:
                     )
 
             if matched_form is not None and self._weights.form > 0:
-                form_candidate_ids = set(entry_by_id) if entry_by_id else set(candidate_ids)
+                form_candidate_ids = (
+                    [entry.id for entry in sorted_entries]
+                    if entry_by_id
+                    else list(candidate_ids)
+                )
                 for entry_id in form_candidate_ids:
                     confidence = _form_similarity(entry_by_id[entry_id], matched_form)
                     if confidence <= 0:
@@ -128,10 +133,22 @@ class CompositeMapper:
                     )
 
             if candidate_scores:
-                best_entry_id, weighted_score = max(candidate_scores.items(), key=lambda item: item[1])
+                best_entry_id, weighted_score = max(
+                    candidate_scores.items(),
+                    key=lambda item: (
+                        item[1],
+                        -entry_order.get(item[0], len(entry_order)),
+                    ),
+                )
                 selected_signals = candidate_signals.get(best_entry_id, [])
                 active_weight = _active_weight(selected_signals, self._weights)
-                confidence = _clamp(weighted_score / active_weight) if active_weight > 0 else 0.0
+                total_weight = _total_weight(self._weights)
+                if active_weight <= 0 or total_weight <= 0:
+                    confidence = 0.0
+                else:
+                    normalized = weighted_score / active_weight
+                    coverage = (active_weight / total_weight) ** 0.5
+                    confidence = _clamp(normalized * coverage)
                 top_signal_type = _strongest_signal_type(selected_signals, self._weights)
                 match_method = _method_from_signal(top_signal_type)
                 program_entry_id = best_entry_id if confidence >= self._minimum_match_confidence else None
@@ -229,6 +246,10 @@ def _method_from_signal(signal_type: MatchSignalType) -> MatchMethod:
     if signal_type == MatchSignalType.FORM_MATCH:
         return MatchMethod.FORM
     return MatchMethod.SEQUENTIAL
+
+
+def _total_weight(weights: MappingWeights) -> float:
+    return weights.sequential + weights.transcription + weights.lookup + weights.form
 
 
 def _active_weight(signals: list[MatchSignal], weights: MappingWeights) -> float:

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import Event, Thread
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
@@ -20,9 +20,6 @@ from cvcutter.presentation.viewmodels.settings_vm import SettingsViewModel
 from cvcutter.presentation.viewmodels.upload_vm import UploadViewModel
 from cvcutter.shared.types import ExportStatus, PrivacySetting, UploadStatus
 from tests.conftest import make_project_config, make_segment_dict
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class MockLoadWorkflow:
@@ -254,11 +251,11 @@ def test_process_viewmodel_start_pause_cancel_and_state_transitions() -> None:
     vm.cancel_processing()
 
     assert workflow.start_calls == 1
-    assert workflow.pause_calls == 1
-    assert workflow.cancel_calls == 1
+    assert workflow.pause_calls == 0
+    assert workflow.cancel_calls == 0
     assert vm.current_stage == "検出"
     assert vm.is_processing is False
-    assert vm.current_operation == "キャンセルしました。"
+    assert vm.current_operation == "処理が完了しました。"
 
 
 def test_process_viewmodel_pause_and_cancel_handle_workflow_errors() -> None:
@@ -273,8 +270,8 @@ def test_process_viewmodel_pause_and_cancel_handle_workflow_errors() -> None:
     vm.pause_processing()
     vm.cancel_processing()
 
-    assert len(vm.errors) == 2
-    assert vm.current_operation == "キャンセルに失敗しました。"
+    assert vm.errors == []
+    assert vm.current_operation == "処理待機中"
 
 
 def test_process_viewmodel_resume_uses_last_started_project_id() -> None:
@@ -552,6 +549,53 @@ def test_process_viewmodel_rejected_concurrent_start_does_not_overwrite_project_
     assert vm.project_id == "project-A"
 
 
+def test_process_viewmodel_marks_resumable_after_pause_request() -> None:
+    class PauseAwareWorkflow(MockProcessingWorkflow):
+        def __init__(self) -> None:
+            super().__init__()
+            self._gate = Event()
+
+        def start(self, project_id: str, progress_callback) -> list[PerformanceSegment]:
+            del project_id
+            progress_callback(ProgressEvent(stage="DETECTION", current=1, total=2, message="検出中"))
+            self._gate.wait(timeout=1.0)
+            return []
+
+        def pause(self) -> None:
+            super().pause()
+            self._gate.set()
+
+    workflow = PauseAwareWorkflow()
+    vm = ProcessViewModel(workflow=workflow)
+    worker = Thread(target=vm.start_processing, args=("project-1",))
+    worker.start()
+
+    vm.pause_processing()
+    worker.join(timeout=1.0)
+
+    assert workflow.pause_calls == 1
+    assert vm.is_resumable is True
+    assert vm.current_operation == "一時停止を要求しました。"
+
+
+def test_process_viewmodel_segment_summary_preserves_export_fields() -> None:
+    class ExportedSegmentWorkflow(MockProcessingWorkflow):
+        def start(self, project_id: str, progress_callback) -> list[PerformanceSegment]:
+            del project_id
+            progress_callback(ProgressEvent(stage="EXPORT", current=1, total=1, message="書き出し完了"))
+            segment = _make_segment()
+            segment.export_status = ExportStatus.EXPORTED
+            segment.exported_file_path = Path("C:/exports/segment-001.mp4")
+            return [segment]
+
+    vm = ProcessViewModel(workflow=ExportedSegmentWorkflow())
+
+    vm.start_processing("project-1")
+
+    assert vm.detected_segments[0].export_status == ExportStatus.EXPORTED
+    assert vm.detected_segments[0].exported_file_path == "C:\\exports\\segment-001.mp4"
+
+
 def test_upload_viewmodel_retry_failed_handles_unknown_record_without_raising() -> None:
     workflow = MockUploadWorkflow()
     vm = UploadViewModel(workflow=workflow, project_id="project-1")
@@ -561,6 +605,54 @@ def test_upload_viewmodel_retry_failed_handles_unknown_record_without_raising() 
 
     assert vm.errors
     assert vm.current_operation == "再試行に失敗しました。"
+
+
+def test_upload_viewmodel_reports_queued_status_when_not_all_uploads_finish() -> None:
+    class QueuedUploadWorkflow(MockUploadWorkflow):
+        def __init__(self) -> None:
+            self.start_calls = 0
+            self.pause_calls = 0
+            self.retry_calls = []
+            self._records = [
+                _make_upload_record(status=UploadStatus.QUEUED),
+                _make_upload_record(status=UploadStatus.QUEUED),
+            ]
+            self._quota = QuotaState(
+                daily_limit=10_000,
+                daily_used=4_800,
+                reset_timestamp_utc=datetime.now(UTC),
+            )
+
+    vm = UploadViewModel(workflow=QueuedUploadWorkflow(), project_id="project-1")
+
+    vm.start_upload()
+
+    assert vm.is_uploading is True
+    assert vm.current_operation == "一部のアップロードはキュー待機中です。"
+
+
+def test_upload_viewmodel_reports_in_progress_status_when_pending_records_remain() -> None:
+    class PendingUploadWorkflow(MockUploadWorkflow):
+        def __init__(self) -> None:
+            self.start_calls = 0
+            self.pause_calls = 0
+            self.retry_calls = []
+            self._records = [
+                _make_upload_record(status=UploadStatus.PENDING),
+                _make_upload_record(status=UploadStatus.UPLOADING),
+            ]
+            self._quota = QuotaState(
+                daily_limit=10_000,
+                daily_used=4_800,
+                reset_timestamp_utc=datetime.now(UTC),
+            )
+
+    vm = UploadViewModel(workflow=PendingUploadWorkflow(), project_id="project-1")
+
+    vm.start_upload()
+
+    assert vm.is_uploading is True
+    assert vm.current_operation == "一部のアップロードは処理中です。"
 
 
 def test_upload_viewmodel_reports_quota_refresh_failure_after_successful_upload() -> None:

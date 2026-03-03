@@ -6,7 +6,7 @@ resume-point selection, and strict checkpoint validation semantics.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from cvcutter.application.checkpoint_manager import CheckpointManager
@@ -344,6 +344,8 @@ def test_make_resume_decision_keeps_latest_matching_checkpoint_when_older_is_sta
         stage=PipelineStage.CONCATENATION,
         input_hashes={"input.mp4": "current-hash"},
     )
+    stale.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+    current.created_at = stale.created_at + timedelta(seconds=1)
     store = MockCheckpointStore(checkpoints=[stale, current])
     manager = CheckpointManager(store)
 
@@ -357,3 +359,139 @@ def test_make_resume_decision_keeps_latest_matching_checkpoint_when_older_is_sta
     assert decision.can_resume is True
     assert decision.resume_stage == PipelineStage.CONCATENATION
     assert decision.invalidated_stages == []
+
+
+def test_make_resume_decision_invalidates_export_when_any_segment_checkpoint_is_stale() -> None:
+    """Segment-scoped stages should invalidate when one segment checkpoint becomes stale."""
+    project_id = "project-1"
+    concat = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.CONCATENATION,
+        input_hashes={"input.mp4": "abc123"},
+    )
+    export_segment_0 = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.EXPORT,
+        segment_index=0,
+        input_hashes={"segment.mp4": "hash-0"},
+    )
+    export_segment_1 = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.EXPORT,
+        segment_index=1,
+        input_hashes={"segment.mp4": "old-hash"},
+    )
+    store = MockCheckpointStore(checkpoints=[concat, export_segment_0, export_segment_1])
+    manager = CheckpointManager(store)
+
+    decision = manager.make_resume_decision(
+        project_id=project_id,
+        current_input_hashes={
+            PipelineStage.CONCATENATION.value: {"input.mp4": "abc123"},
+            PipelineStage.EXPORT.value: {
+                "segment:0": {"segment.mp4": "hash-0"},
+                "segment:1": {"segment.mp4": "hash-1"},
+            },
+        },
+        current_config={stage.value: make_project_config() for stage in PipelineStage},
+        current_model_versions={stage.value: {"yolov8n": "v8.0.0"} for stage in PipelineStage},
+    )
+
+    assert decision.can_resume is True
+    assert decision.resume_stage == PipelineStage.CONCATENATION
+    assert PipelineStage.EXPORT in decision.invalidated_stages
+    assert decision.reasons[PipelineStage.EXPORT] == "input_hash_mismatch"
+
+
+def test_make_resume_decision_accepts_scoped_config_against_full_checkpoint_snapshot() -> None:
+    """Scoped current config should match full checkpoint snapshots when overlapping keys match."""
+    project_id = "project-1"
+    checkpoint = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.CONCATENATION,
+        config_snapshot={"quality": "high", "legacy_flag": True},
+    )
+    store = MockCheckpointStore(checkpoints=[checkpoint])
+    manager = CheckpointManager(store)
+
+    decision = manager.make_resume_decision(
+        project_id=project_id,
+        current_input_hashes={"input.mp4": "abc123"},
+        current_config={"quality": "high"},
+        current_model_versions={"yolov8n": "v8.0.0"},
+    )
+
+    assert decision.can_resume is True
+    assert decision.resume_stage == PipelineStage.CONCATENATION
+    assert decision.invalidated_stages == []
+
+
+def test_make_resume_decision_ignores_stage_level_export_checkpoint_when_segment_checkpoints_exist() -> None:
+    """Segment-level export checkpoints should take precedence over stage-level legacy checkpoints."""
+    project_id = "project-1"
+    concat = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.CONCATENATION,
+        input_hashes={"input.mp4": "abc123"},
+    )
+    export_stage_level = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.EXPORT,
+        input_hashes={"segment.mp4": "stale"},
+        segment_index=None,
+    )
+    export_segment = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.EXPORT,
+        input_hashes={"segment.mp4": "hash-0"},
+        segment_index=0,
+    )
+    store = MockCheckpointStore(checkpoints=[concat, export_stage_level, export_segment])
+    manager = CheckpointManager(store)
+
+    decision = manager.make_resume_decision(
+        project_id=project_id,
+        current_input_hashes={
+            PipelineStage.CONCATENATION.value: {"input.mp4": "abc123"},
+            PipelineStage.EXPORT.value: {"segment:0": {"segment.mp4": "hash-0"}},
+        },
+        current_config={stage.value: make_project_config() for stage in PipelineStage},
+        current_model_versions={stage.value: {"yolov8n": "v8.0.0"} for stage in PipelineStage},
+    )
+
+    assert decision.can_resume is True
+    assert PipelineStage.EXPORT not in decision.invalidated_stages
+
+
+def test_make_resume_decision_invalidates_export_when_expected_segment_checkpoint_is_missing() -> None:
+    """Export stage must invalidate when any expected segment checkpoint is missing."""
+    project_id = "project-1"
+    concat = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.CONCATENATION,
+        input_hashes={"input.mp4": "abc123"},
+    )
+    export_segment_0 = _make_checkpoint(
+        project_id=project_id,
+        stage=PipelineStage.EXPORT,
+        input_hashes={"segment.mp4": "hash-0"},
+        segment_index=0,
+    )
+    store = MockCheckpointStore(checkpoints=[concat, export_segment_0])
+    manager = CheckpointManager(store)
+
+    decision = manager.make_resume_decision(
+        project_id=project_id,
+        current_input_hashes={
+            PipelineStage.CONCATENATION.value: {"input.mp4": "abc123"},
+            PipelineStage.EXPORT.value: {
+                "segment:0": {"segment.mp4": "hash-0"},
+                "segment:1": {"segment.mp4": "hash-1"},
+            },
+        },
+        current_config={stage.value: make_project_config() for stage in PipelineStage},
+        current_model_versions={stage.value: {"yolov8n": "v8.0.0"} for stage in PipelineStage},
+    )
+
+    assert PipelineStage.EXPORT in decision.invalidated_stages
+    assert decision.reasons[PipelineStage.EXPORT] == "missing_segment_checkpoint"

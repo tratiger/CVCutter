@@ -61,11 +61,20 @@ class VisualActivityDetector:
         samples: list[dict[str, float | bool | int]] = []
         for frame in self._frame_sampler(Path(video_path), fps):
             detections = self._filter_relevant(self._model_runner.detect(frame))
-            person_count = sum(1 for detection in detections if detection.class_name.lower() == "person")
-            instrument_present = any(
-                detection.class_name.lower() in self._instrument_labels for detection in detections
+            activity_detections = [
+                detection for detection in detections if self._is_activity_class(detection.class_name)
+            ]
+            person_count = sum(
+                1 for detection in activity_detections if detection.class_name.lower() == "person"
             )
-            activity_confidence = max((detection.confidence for detection in detections), default=0.0)
+            instrument_present = any(
+                detection.class_name.lower() in self._instrument_labels
+                for detection in activity_detections
+            )
+            activity_confidence = max(
+                (detection.confidence for detection in activity_detections),
+                default=0.0,
+            )
             samples.append(
                 {
                     "time_seconds": frame.timestamp_seconds,
@@ -82,6 +91,10 @@ class VisualActivityDetector:
 
     def _filter_relevant(self, detections: list[Detection]) -> list[Detection]:
         return [detection for detection in detections if detection.confidence >= self._min_detection_confidence]
+
+    def _is_activity_class(self, class_name: str) -> bool:
+        normalized = class_name.lower()
+        return normalized == "person" or normalized in self._instrument_labels
 
     def _samples_to_signals(self, samples: list[dict[str, float | bool | int]], fps: float) -> list[DetectionSignal]:
         """Aggregate sampled detections into contiguous active intervals."""
@@ -113,7 +126,7 @@ class VisualActivityDetector:
         run = samples[run_start : run_end + 1]
         if not run:
             return None
-        step = self._sample_step_seconds(samples, fps)
+        step = self._sample_step_seconds(run, fps)
         start_seconds = float(run[0]["time_seconds"])
         end_seconds = float(run[-1]["time_seconds"]) + step
         confidences = [float(item["confidence"]) for item in run]
@@ -137,9 +150,9 @@ class VisualActivityDetector:
     def _sample_step_seconds(samples: list[dict[str, float | bool | int]], fps: float) -> float:
         if len(samples) < 2:
             return 1.0 / fps
-        first = float(samples[0]["time_seconds"])
-        second = float(samples[1]["time_seconds"])
-        return max(second - first, 1e-3)
+        previous = float(samples[-2]["time_seconds"])
+        last = float(samples[-1]["time_seconds"])
+        return max(last - previous, 1e-3)
 
     @staticmethod
     def _default_frame_sampler(video_path: Path, fps: float) -> Iterable[VideoFrame]:

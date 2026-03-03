@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
 
 class UploadWorkflow:
     """Coordinate upload queue processing with quota and checkpoint persistence."""
+
+    _run_lock = RLock()
+    _is_upload_run_active = False
+    _active_upload_owner: UploadWorkflow | None = None
 
     def __init__(
         self,
@@ -55,137 +60,166 @@ class UploadWorkflow:
         records: list[UploadRecord] | None = None,
     ) -> list[UploadRecord]:
         """Start or continue processing upload records with quota-aware queue behavior."""
-        project_id = self._project_id(project)
-        active_records = self._load_records(project_id, records)
-        self._active_project = project
-        self._cached_records = active_records
+        if not self._run_lock.acquire(blocking=False):
+            raise RuntimeError("Upload workflow is already running.")
+        upload_run_activated = False
+        try:
+            if self.__class__._is_upload_run_active:
+                raise RuntimeError("Upload workflow is already running.")
+            self.__class__._is_upload_run_active = True
+            self.__class__._active_upload_owner = self
+            upload_run_activated = True
+            self._pause_requested = False
+            self._cancel_requested = False
+            project_id = self._project_id(project)
+            active_records = self._load_records(project_id, records)
+            self._active_project = project
+            self._cached_records = active_records
 
-        quota_state, reset_applied = self._reset_quota_if_due(self._load_quota_state())
-        if reset_applied:
-            self._release_queued_records_after_reset(active_records)
-        self._recover_orphaned_uploads(project, active_records)
-        self._persist_state(project_id, active_records, quota_state)
-
-        if not self._upload_service.authenticate():
-            self._queue_pending_for_auth_retry(active_records, project, quota_state)
-            return active_records
-
-        self._release_auth_queued_records(active_records)
-        segments = self._segments_by_id(project_id)
-        mappings = self._mappings_by_id(project_id)
-        self._assign_playlist_if_needed(project, active_records)
-
-        for record in self._sorted_records(active_records, segments):
-            if self._cancel_requested or self._pause_requested:
-                break
-
-            if record.upload_status == UploadStatus.COMPLETED:
-                continue
-            if record.upload_status == UploadStatus.QUEUED:
-                continue
-            if record.upload_status == UploadStatus.FAILED:
-                continue
-            if record.upload_status != UploadStatus.PENDING:
-                continue
-
-            quota_state, reset_applied = self._reset_quota_if_due(quota_state)
+            quota_state, reset_applied = self._reset_quota_if_due(self._load_quota_state())
             if reset_applied:
                 self._release_queued_records_after_reset(active_records)
-            if not quota_state.can_upload(record.quota_cost):
-                self._queue_record(record, "Daily quota exhausted; queued until reset.")
-                self._write_upload_checkpoint(project, record)
-                self._persist_state(project_id, active_records, quota_state)
-                continue
-
-            quota_state = self._process_one_record(
-                project=project,
-                record=record,
-                segments=segments,
-                mappings=mappings,
-                quota_state=quota_state,
-                all_records=active_records,
-            )
+            self._recover_orphaned_uploads(project, active_records)
             self._persist_state(project_id, active_records, quota_state)
 
-        self._pause_requested = False
-        self._cancel_requested = False
-        self._persist_state(project_id, active_records, quota_state)
-        return active_records
+            if not self._upload_service.authenticate():
+                self._queue_pending_for_auth_retry(active_records, project, quota_state)
+                return active_records
+
+            self._release_auth_queued_records(active_records)
+            segments = self._segments_by_id(project_id)
+            mappings = self._mappings_by_id(project_id)
+            self._assign_playlist_if_needed(project, active_records)
+
+            for record in self._sorted_records(active_records, segments):
+                if self._cancel_requested or self._pause_requested:
+                    break
+
+                if record.upload_status == UploadStatus.COMPLETED:
+                    continue
+                if record.upload_status == UploadStatus.QUEUED:
+                    continue
+                if record.upload_status == UploadStatus.FAILED:
+                    continue
+                if record.upload_status != UploadStatus.PENDING:
+                    continue
+
+                quota_state, reset_applied = self._reset_quota_if_due(quota_state)
+                if reset_applied:
+                    self._release_queued_records_after_reset(active_records)
+                if not quota_state.can_upload(record.quota_cost):
+                    self._queue_record(record, "Daily quota exhausted; queued until reset.")
+                    self._write_upload_checkpoint(project, record)
+                    self._persist_state(project_id, active_records, quota_state)
+                    continue
+
+                quota_state = self._process_one_record(
+                    project=project,
+                    record=record,
+                    segments=segments,
+                    mappings=mappings,
+                    quota_state=quota_state,
+                    all_records=active_records,
+                )
+                self._persist_state(project_id, active_records, quota_state)
+
+            self._persist_state(project_id, active_records, quota_state)
+            return active_records
+        finally:
+            if upload_run_activated:
+                self.__class__._is_upload_run_active = False
+                if self.__class__._active_upload_owner is self:
+                    self.__class__._active_upload_owner = None
+            self._pause_requested = False
+            self._cancel_requested = False
+            self._run_lock.release()
 
     def retry_failed(self, record_id: str, project: ConcertProject | None = None) -> UploadRecord:
         """Retry one failed upload and decide resume-vs-restart-from-zero semantics."""
-        if project is not None:
-            self._active_project = project
-            self._cached_records = self._project_store.load_upload_records(self._project_id(project))
-        if self._active_project is None:
-            raise RuntimeError("No active project context for retry.")
+        if not self._run_lock.acquire(blocking=False):
+            raise RuntimeError("Upload workflow is already running.")
+        try:
+            if project is not None:
+                self._active_project = project
+                self._cached_records = self._project_store.load_upload_records(self._project_id(project))
+            if self._active_project is None:
+                raise RuntimeError("No active project context for retry.")
 
-        project = self._active_project
-        project_id = self._project_id(project)
-        records = self._cached_records or self._project_store.load_upload_records(project_id)
-        target = next((record for record in records if record.id == record_id), None)
-        if target is None:
-            raise ValueError(f"Unknown upload record: {record_id}")
-        if target.upload_status == UploadStatus.UPLOADING:
-            self._mark_failed(
-                target,
-                failure_kind="UNKNOWN",
-                error_message="Upload interrupted by previous session.",
-                restart_from_zero=False,
-                session_invalidated_at_utc=None,
+            project = self._active_project
+            project_id = self._project_id(project)
+            records = self._cached_records or self._project_store.load_upload_records(project_id)
+            target = next((record for record in records if record.id == record_id), None)
+            if target is None:
+                raise ValueError(f"Unknown upload record: {record_id}")
+            if target.upload_status == UploadStatus.UPLOADING:
+                self._mark_failed(
+                    target,
+                    failure_kind="UNKNOWN",
+                    error_message="Upload interrupted by previous session.",
+                    restart_from_zero=False,
+                    session_invalidated_at_utc=None,
+                )
+            if target.upload_status != UploadStatus.FAILED:
+                return target
+
+            prior_failure_kind = target.failure_kind
+            target.transition_to(UploadStatus.PENDING)
+            target.error_detail = None
+            target.failure_kind = None
+            target.restart_from_zero = False
+            target.session_invalidated_at_utc = None
+            if prior_failure_kind == "SESSION_INVALIDATED":
+                target.resumable_upload_uri = None
+                target.bytes_uploaded = 0
+
+            quota_state, reset_applied = self._reset_quota_if_due(self._load_quota_state())
+            if reset_applied:
+                self._release_queued_records_after_reset(records)
+            if not quota_state.can_upload(target.quota_cost):
+                self._queue_record(target, "Daily quota exhausted; queued until reset.")
+                self._write_upload_checkpoint(project, target)
+                self._persist_state(project_id, records, quota_state)
+                return target
+
+            if not self._upload_service.authenticate():
+                target.transition_to(UploadStatus.UPLOADING)
+                self._mark_failed(
+                    target,
+                    failure_kind="AUTH_FAILURE",
+                    error_message="Authentication failed.",
+                    restart_from_zero=False,
+                    session_invalidated_at_utc=None,
+                )
+                self._write_upload_checkpoint(project, target)
+                self._persist_state(project_id, records, quota_state)
+                return target
+
+            updated_quota = self._process_one_record(
+                project=project,
+                record=target,
+                segments=self._segments_by_id(project_id),
+                mappings=self._mappings_by_id(project_id),
+                quota_state=quota_state,
+                all_records=records,
             )
-        if target.upload_status != UploadStatus.FAILED:
+            self._persist_state(project_id, records, updated_quota)
             return target
-
-        prior_failure_kind = target.failure_kind
-        target.transition_to(UploadStatus.PENDING)
-        target.error_detail = None
-        target.failure_kind = None
-        target.restart_from_zero = False
-        target.session_invalidated_at_utc = None
-        if prior_failure_kind == "SESSION_INVALIDATED":
-            target.resumable_upload_uri = None
-            target.bytes_uploaded = 0
-
-        quota_state, reset_applied = self._reset_quota_if_due(self._load_quota_state())
-        if reset_applied:
-            self._release_queued_records_after_reset(records)
-        if not quota_state.can_upload(target.quota_cost):
-            self._queue_record(target, "Daily quota exhausted; queued until reset.")
-            self._persist_state(project_id, records, quota_state)
-            return target
-
-        if not self._upload_service.authenticate():
-            target.transition_to(UploadStatus.UPLOADING)
-            self._mark_failed(
-                target,
-                failure_kind="AUTH_FAILURE",
-                error_message="Authentication failed.",
-                restart_from_zero=False,
-                session_invalidated_at_utc=None,
-            )
-            self._write_upload_checkpoint(project, target)
-            self._persist_state(project_id, records, quota_state)
-            return target
-
-        updated_quota = self._process_one_record(
-            project=project,
-            record=target,
-            segments=self._segments_by_id(project_id),
-            mappings=self._mappings_by_id(project_id),
-            quota_state=quota_state,
-            all_records=records,
-        )
-        self._persist_state(project_id, records, updated_quota)
-        return target
+        finally:
+            self._run_lock.release()
 
     def pause(self) -> None:
         """Request queue pause at the next record boundary."""
-        self._pause_requested = True
+        owner = self.__class__._active_upload_owner
+        if owner is None:
+            return
+        owner._pause_requested = True
 
     def cancel(self) -> None:
         """Request queue cancellation at the next record boundary."""
-        self._cancel_requested = True
+        owner = self.__class__._active_upload_owner
+        if owner is None:
+            return
+        owner._cancel_requested = True
 
     def pause_upload(self) -> None:
         """Compatibility alias for presentation-layer protocol."""
@@ -207,31 +241,45 @@ class UploadWorkflow:
     ) -> list[UploadRecord]:
         """Auto-resume queued records once quota reset time is reached."""
         project_id = self._project_id(project)
-        active_records = self._load_records(project_id, records)
-        self._active_project = project
-        self._cached_records = active_records
-        quota_state = self._load_quota_state()
-        current_time = now_utc or datetime.now(UTC)
-        if current_time < quota_state.reset_timestamp_utc:
-            self._persist_state(project_id, active_records, quota_state)
-            return active_records
+        if not self._run_lock.acquire(blocking=False):
+            return self._project_store.load_upload_records(project_id)
+        try:
+            if self.__class__._is_upload_run_active:
+                return self._project_store.load_upload_records(project_id)
+            active_records = self._load_records(project_id, records)
+            self._active_project = project
+            self._cached_records = active_records
+            quota_state = self._load_quota_state()
+            current_time = now_utc or datetime.now(UTC)
+            if current_time < quota_state.reset_timestamp_utc:
+                self._persist_state(project_id, active_records, quota_state)
+                return active_records
 
-        quota_state = quota_state.reset()
-        self._release_queued_records_after_reset(active_records)
-        self._persist_state(project_id, active_records, quota_state)
-        return self.start_upload(project, active_records)
+            quota_state = quota_state.reset()
+            self._release_queued_records_after_reset(active_records)
+            self._persist_state(project_id, active_records, quota_state)
+            return self.start_upload(project, active_records)
+        finally:
+            self._run_lock.release()
 
     def resume_queued_on_startup(self, project: ConcertProject) -> list[UploadRecord]:
         """Next-launch recovery: load queued uploads and auto-resume when quota allows."""
         project_id = self._project_id(project)
-        records = self._project_store.load_upload_records(project_id)
-        self._active_project = project
-        self._recover_orphaned_uploads(project, records)
-        if not any(record.upload_status == UploadStatus.QUEUED for record in records):
-            self._cached_records = records
-            self._persist_state(project_id, records, self._load_quota_state())
-            return records
-        return self.run_quota_reset_scheduler(project, records)
+        if not self._run_lock.acquire(blocking=False):
+            return self._project_store.load_upload_records(project_id)
+        try:
+            if self.__class__._is_upload_run_active:
+                return self._project_store.load_upload_records(project_id)
+            records = self._project_store.load_upload_records(project_id)
+            self._active_project = project
+            self._recover_orphaned_uploads(project, records)
+            if not any(record.upload_status == UploadStatus.QUEUED for record in records):
+                self._cached_records = records
+                self._persist_state(project_id, records, self._load_quota_state())
+                return records
+            return self.run_quota_reset_scheduler(project, records)
+        finally:
+            self._run_lock.release()
 
     def _process_one_record(
         self,
@@ -418,6 +466,7 @@ class UploadWorkflow:
             record.session_invalidated_at_utc = session_invalidated_at_utc
             if restart_from_zero:
                 record.bytes_uploaded = 0
+                record.resumable_upload_uri = None
         record.failure_kind = failure_kind
         record.error_detail = error_message
         record.transition_to(UploadStatus.FAILED)
@@ -510,9 +559,13 @@ class UploadWorkflow:
     def _reset_quota_if_due(self, quota_state: QuotaState) -> tuple[QuotaState, bool]:
         """Reset quota when reset timestamp has passed."""
         current_time = datetime.now(UTC)
-        if current_time < quota_state.reset_timestamp_utc:
+        reset_state = quota_state
+        reset_applied = False
+        while current_time >= reset_state.reset_timestamp_utc:
+            reset_state = reset_state.reset()
+            reset_applied = True
+        if not reset_applied:
             return quota_state, False
-        reset_state = quota_state.reset()
         self._quota_state_cache = reset_state
         return reset_state, True
 

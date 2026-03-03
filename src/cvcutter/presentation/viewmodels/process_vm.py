@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from cvcutter.domain.models.segment import PerformanceSegment
     from cvcutter.domain.services.types import ProgressEvent
+    from cvcutter.shared.types import ExportStatus
 
 _STAGE_SEQUENCE = [
     "CONCATENATION",
@@ -79,6 +80,8 @@ class SegmentSummary:
     effective_detection_mode: str
     fallback_reason: str | None
     detection_confidence: float
+    exported_file_path: str | None
+    export_status: ExportStatus
 
 
 @dataclass
@@ -115,6 +118,8 @@ class ProcessViewModel:
 
     def pause_processing(self) -> None:
         """Pause the running processing task."""
+        if not self.is_processing:
+            return
         self._pause_requested = True
         try:
             self.workflow.pause()
@@ -127,6 +132,8 @@ class ProcessViewModel:
 
     def cancel_processing(self) -> None:
         """Cancel the running processing task."""
+        if not self.is_processing:
+            return
         self._cancel_requested = True
         try:
             self.workflow.cancel()
@@ -194,6 +201,7 @@ class ProcessViewModel:
             self.current_operation = "処理を開始しています..."
             self.detection_mode = "full"
             self.reduced_accuracy_notice = None
+            self.is_resumable = False
             segments = (
                 self.workflow.resume(project_id, self.on_progress)
                 if use_resume
@@ -201,14 +209,18 @@ class ProcessViewModel:
             )
             self._apply_segments(segments)
             if self._cancel_requested:
+                self.is_resumable = False
                 self.current_operation = "キャンセルしました。"
             elif self._pause_requested:
+                self.is_resumable = True
                 self.current_operation = "一時停止を要求しました。"
             else:
+                self.is_resumable = False
                 self.current_operation = "処理が完了しました。"
         except Exception as exc:
             self.detection_mode = "full"
             self.reduced_accuracy_notice = None
+            self.is_resumable = False
             self.errors.append(self.translate_error(exc))
             self.current_operation = "処理に失敗しました。"
         finally:
@@ -226,6 +238,10 @@ class ProcessViewModel:
                 effective_detection_mode=segment.effective_detection_mode,
                 fallback_reason=segment.fallback_reason,
                 detection_confidence=segment.detection_confidence,
+                exported_file_path=(
+                    str(segment.exported_file_path) if segment.exported_file_path is not None else None
+                ),
+                export_status=segment.export_status,
             )
             for segment in segments
         ]
