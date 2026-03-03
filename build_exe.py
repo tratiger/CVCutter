@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from importlib import metadata
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -41,6 +42,18 @@ def _clean_previous_builds() -> None:
             shutil.rmtree(target)
 
 
+def _copy_metadata_args() -> list[str]:
+    packages = ("flet", "flet-desktop", "openai-whisper", "ultralytics")
+    args: list[str] = []
+    for package in packages:
+        try:
+            metadata.distribution(package)
+        except metadata.PackageNotFoundError:
+            continue
+        args.append(f"--copy-metadata={package}")
+    return args
+
+
 def build() -> None:
     """Build one-file desktop executable using the layered Flet entry point."""
     _clean_previous_builds()
@@ -65,10 +78,6 @@ def build() -> None:
         "--collect-data=flet",
         "--collect-data=flet_desktop",
         "--collect-data=imageio_ffmpeg",
-        "--copy-metadata=flet",
-        "--copy-metadata=flet-desktop",
-        "--copy-metadata=openai-whisper",
-        "--copy-metadata=ultralytics",
         "--exclude-module=customtkinter",
         "--exclude-module=moviepy",
         "--exclude-module=matplotlib",
@@ -76,6 +85,7 @@ def build() -> None:
         "--exclude-module=jedi",
         "--exclude-module=notebook",
     ]
+    command.extend(_copy_metadata_args())
     if ICON_PATH.exists():
         command.append(f"--icon={ICON_PATH}")
     command.extend(_collect_model_add_data_args())
