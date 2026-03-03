@@ -62,6 +62,7 @@ def build() -> None:
         "--name=CVCutter",
         "--windowed",
         "--onefile",
+        "--noupx",
         "--noconfirm",
         "--clean",
         "--collect-submodules=cvcutter",
