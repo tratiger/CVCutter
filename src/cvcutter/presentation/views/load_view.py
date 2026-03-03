@@ -31,8 +31,8 @@ def build_load_view(
             page.update()
 
     picker = file_picker or ft.FilePicker()
-    if page is not None and picker not in page.overlay:
-        page.overlay.append(picker)
+    if page is not None and picker not in page.services:
+        page.services.append(picker)
 
     async def pick_files_task() -> None:
         if page is None:

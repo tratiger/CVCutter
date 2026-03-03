@@ -222,7 +222,7 @@ def _build_page(page: ft.Page) -> None:
     )
     upload_vm = UploadViewModel(workflow=_UploadWorkflowService(), project_id=app_state.project_id)
     load_picker = ft.FilePicker()
-    page.overlay.append(load_picker)
+    page.services.append(load_picker)
 
     body = ft.Container(expand=True)
     last_preview_signature: tuple[tuple[object, ...], ...] | None = None
