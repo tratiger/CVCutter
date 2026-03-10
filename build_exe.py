@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
 
@@ -11,9 +12,6 @@ import PyInstaller.__main__
 PROJECT_ROOT = Path(__file__).resolve().parent
 ENTRYPOINT = PROJECT_ROOT / "src" / "cvcutter" / "main.py"
 ICON_PATH = PROJECT_ROOT / "src" / "favicon.ico"
-_BUILD_DIR_NAMES = ("build", "dist")
-
-
 def _windows_add_data_arg(source: Path, target: str) -> str:
     return f"--add-data={source};{target}"
 
@@ -35,11 +33,24 @@ def _collect_model_add_data_args() -> list[str]:
     return arguments
 
 
-def _clean_previous_builds() -> None:
-    for directory_name in _BUILD_DIR_NAMES:
-        target = PROJECT_ROOT / directory_name
-        if target.exists():
-            shutil.rmtree(target)
+def _clean_previous_builds() -> Path:
+    build_dir = PROJECT_ROOT / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+
+    dist_dir = PROJECT_ROOT / "dist"
+    if not dist_dir.exists():
+        return dist_dir
+    try:
+        shutil.rmtree(dist_dir)
+        return dist_dir
+    except PermissionError:
+        suffix = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        fallback = PROJECT_ROOT / f"dist-{suffix}"
+        if fallback.exists():
+            shutil.rmtree(fallback)
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 def _copy_metadata_args() -> list[str]:
@@ -56,7 +67,7 @@ def _copy_metadata_args() -> list[str]:
 
 def build() -> None:
     """Build one-file desktop executable using the layered Flet entry point."""
-    _clean_previous_builds()
+    dist_dir = _clean_previous_builds()
     command: list[str] = [
         str(ENTRYPOINT),
         "--name=CVCutter",
@@ -65,6 +76,7 @@ def build() -> None:
         "--noupx",
         "--noconfirm",
         "--clean",
+        f"--distpath={dist_dir}",
         "--collect-submodules=cvcutter",
         "--collect-submodules=flet",
         "--collect-submodules=flet_desktop",

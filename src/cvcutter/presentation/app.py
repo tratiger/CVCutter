@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 from uuid import UUID, uuid4
 
 import flet as ft
 
-from cvcutter.domain.models.project import ProjectConfig
+from cvcutter.application.checkpoint_manager import CheckpointManager
+from cvcutter.application.pipeline import PipelineOrchestrator
+from cvcutter.domain.models.project import ConcertProject, ExternalAudio, ProjectConfig, SourceVideo
 from cvcutter.domain.models.segment import PerformanceSegment
 from cvcutter.domain.models.upload import QuotaState, UploadRecord
-from cvcutter.domain.services.types import ProgressEvent
+from cvcutter.infrastructure.ffmpeg.transcoder import FFmpegTranscoder
+from cvcutter.infrastructure.persistence.json_checkpoint_store import JsonCheckpointStore
+from cvcutter.infrastructure.persistence.json_config import JsonConfig
+from cvcutter.infrastructure.persistence.json_project_store import JsonProjectStore
 from cvcutter.presentation.viewmodels.load_vm import LoadViewModel
 from cvcutter.presentation.viewmodels.preview_vm import PreviewViewModel
 from cvcutter.presentation.viewmodels.process_vm import ProcessViewModel
@@ -23,7 +30,8 @@ from cvcutter.presentation.views.preview_view import build_preview_view
 from cvcutter.presentation.views.process_view import build_process_view
 from cvcutter.presentation.views.settings_view import build_settings_view
 from cvcutter.presentation.views.upload_view import build_upload_view
-from cvcutter.shared.types import ExportStatus, PrivacySetting, UploadStatus
+from cvcutter.shared.hashing import compute_file_hash
+from cvcutter.shared.types import PrivacySetting, ProcessingState, UploadStatus
 
 
 @dataclass
@@ -33,75 +41,216 @@ class _AppState:
     project_id: str = "active-project"
 
 
-class _LoadWorkflowService:
-    """In-memory load workflow stub."""
+class _VideoProbeResult(Protocol):
+    @property
+    def duration_seconds(self) -> float:
+        ...
 
-    def __init__(self, state: _AppState) -> None:
+    @property
+    def resolution(self) -> tuple[int, int]:
+        ...
+
+    @property
+    def codec(self) -> str:
+        ...
+
+    @property
+    def file_size_bytes(self) -> int:
+        ...
+
+
+class _VideoProber(Protocol):
+    def probe(self, file_path: Path) -> _VideoProbeResult:
+        ...
+
+
+class _PipelineWorkflow(Protocol):
+    def run(self, project: ConcertProject, progress_callback) -> ConcertProject:
+        ...
+
+    def resume(self, project: ConcertProject, progress_callback) -> ConcertProject:
+        ...
+
+    def restart(self, project: ConcertProject, progress_callback) -> ConcertProject:
+        ...
+
+    def pause(self) -> None:
+        ...
+
+    def cancel(self) -> None:
+        ...
+
+
+def _default_base_dir() -> Path:
+    """Resolve the per-user persistent storage directory."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "cvcutter"
+    return Path.home() / "AppData" / "Local" / "cvcutter"
+
+
+class _LoadWorkflowService:
+    """Persist newly created projects from load-screen inputs."""
+
+    def __init__(
+        self,
+        state: _AppState,
+        *,
+        project_store: JsonProjectStore,
+        video_io: _VideoProber,
+        config_store: JsonConfig,
+    ) -> None:
         self._state = state
+        self._project_store = project_store
+        self._video_io = video_io
+        self._config_store = config_store
         self.last_payload: dict[str, object] | None = None
 
-    def create_project(self, **payload: object) -> dict[str, object]:
-        self._state.project_id = str(uuid4())
+    def create_project(
+        self,
+        *,
+        project_name: str,
+        video_files: list[Path],
+        external_audio_file: Path | None,
+        program_pdf_file: Path | None,
+        form_csv_file: Path | None,
+        form_remote_id: str | None,
+        form_remote_sheet_id: str | None,
+        output_directory: Path,
+    ) -> dict[str, object]:
+        if not video_files:
+            raise ValueError("動画ファイルを1つ以上選択してください。")
+
+        resolved_videos = [Path(path).expanduser().resolve() for path in video_files]
+        for source_path in resolved_videos:
+            if not source_path.exists():
+                raise ValueError(f"動画ファイルが見つかりません: {source_path}")
+
+        resolved_output_dir = Path(output_directory).expanduser().resolve()
+        resolved_output_dir.mkdir(parents=True, exist_ok=True)
+        config = self._config_store.load_config()
+        now_utc = datetime.now(UTC)
+
+        source_videos: list[SourceVideo] = []
+        for order_index, source_path in enumerate(resolved_videos):
+            probe = self._video_io.probe(source_path)
+            width, height = probe.resolution
+            if width <= 0 or height <= 0:
+                width, height = 1, 1
+            source_videos.append(
+                SourceVideo(
+                    id=str(uuid4()),
+                    file_path=source_path,
+                    order_index=order_index,
+                    duration_seconds=max(0.0, probe.duration_seconds),
+                    resolution=(width, height),
+                    codec=(probe.codec or "unknown").strip() or "unknown",
+                    creation_timestamp=datetime.fromtimestamp(source_path.stat().st_mtime, tz=UTC),
+                    file_hash=compute_file_hash(source_path),
+                    file_size_bytes=max(int(probe.file_size_bytes), source_path.stat().st_size),
+                ),
+            )
+
+        resolved_program_pdf = Path(program_pdf_file).expanduser().resolve() if program_pdf_file else None
+        if resolved_program_pdf is not None and not resolved_program_pdf.exists():
+            raise ValueError(f"プログラムPDFが見つかりません: {resolved_program_pdf}")
+
+        resolved_form_csv = Path(form_csv_file).expanduser().resolve() if form_csv_file else None
+        if resolved_form_csv is not None and not resolved_form_csv.exists():
+            raise ValueError(f"フォームCSVが見つかりません: {resolved_form_csv}")
+
+        external_audio = self._build_external_audio(external_audio_file, config.audio_sync_sample_rate)
+
+        project = ConcertProject(
+            id=uuid4(),
+            name=project_name.strip(),
+            event_date=None,
+            venue=None,
+            source_videos=source_videos,
+            external_audio=external_audio,
+            program_pdf_path=resolved_program_pdf,
+            form_source_path=resolved_form_csv,
+            form_remote_id=form_remote_id,
+            form_remote_sheet_id=form_remote_sheet_id,
+            output_directory=resolved_output_dir,
+            config_snapshot=config,
+            processing_state=ProcessingState.CREATED,
+            created_at=now_utc,
+            updated_at=now_utc,
+        )
+        self._project_store.save_project(project)
+        if self._project_store.load_project(str(project.id)) is None:
+            raise RuntimeError("プロジェクト情報の保存に失敗しました。保存先の権限を確認してください。")
+
+        self._state.project_id = str(project.id)
+        payload: dict[str, object] = {
+            "project_name": project_name,
+            "video_files": video_files,
+            "external_audio_file": external_audio_file,
+            "program_pdf_file": program_pdf_file,
+            "form_csv_file": form_csv_file,
+            "form_remote_id": form_remote_id,
+            "form_remote_sheet_id": form_remote_sheet_id,
+            "output_directory": output_directory,
+        }
         self.last_payload = dict(payload)
         return {"project_id": self._state.project_id, **payload}
 
+    def _build_external_audio(
+        self,
+        external_audio_file: Path | None,
+        sample_rate: int,
+    ) -> ExternalAudio | None:
+        if external_audio_file is None:
+            return None
+        audio_path = Path(external_audio_file).expanduser().resolve()
+        if not audio_path.exists():
+            raise ValueError(f"外部音声ファイルが見つかりません: {audio_path}")
+        probe = self._video_io.probe(audio_path)
+        audio_format = audio_path.suffix.strip(".").lower() or "wav"
+        return ExternalAudio(
+            id=str(uuid4()),
+            file_path=audio_path,
+            duration_seconds=max(0.0, probe.duration_seconds),
+            format=audio_format,
+            sample_rate=max(1, int(sample_rate)),
+            file_hash=compute_file_hash(audio_path),
+        )
+
 
 class _ProcessingWorkflowService:
-    """In-memory processing workflow stub."""
+    """Processing workflow adapter backed by the real pipeline orchestrator."""
 
-    def __init__(self, yolo_enabled_provider) -> None:
-        self._yolo_enabled_provider = yolo_enabled_provider
-        self._pause_requested = False
-        self._cancel_requested = False
+    def __init__(
+        self,
+        *,
+        project_store: JsonProjectStore,
+        pipeline: _PipelineWorkflow,
+    ) -> None:
+        self._project_store = project_store
+        self._pipeline = pipeline
 
     def start(self, project_id: str, progress_callback) -> list[PerformanceSegment]:
-        return self._run(project_id, progress_callback)
+        project = self._require_project(project_id)
+        self._pipeline.restart(project, progress_callback)
+        return self._project_store.load_segments(project_id)
 
     def resume(self, project_id: str, progress_callback) -> list[PerformanceSegment]:
-        return self._run(project_id, progress_callback)
+        project = self._require_project(project_id)
+        self._pipeline.resume(project, progress_callback)
+        return self._project_store.load_segments(project_id)
 
     def pause(self) -> None:
-        self._pause_requested = True
+        self._pipeline.pause()
 
     def cancel(self) -> None:
-        self._cancel_requested = True
+        self._pipeline.cancel()
 
-    def _run(self, project_id: str, progress_callback) -> list[PerformanceSegment]:
-        del project_id
-        self._pause_requested = False
-        self._cancel_requested = False
-        stage_names = ["CONCATENATION", "DETECTION", "AUDIO_SYNC", "EXPORT", "MAPPING", "UPLOAD"]
-        for index, stage_name in enumerate(stage_names, start=1):
-            if self._cancel_requested:
-                break
-            progress_callback(
-                ProgressEvent(
-                    stage=stage_name,
-                    current=index,
-                    total=len(stage_names),
-                    message=f"{stage_name} を実行中",
-                ),
-            )
-            if self._pause_requested:
-                break
-
-        detection_mode = "full" if self._yolo_enabled_provider() else "audio_only"
-        fallback_reason = None if detection_mode == "full" else "TOGGLE_DISABLED"
-        return [
-            PerformanceSegment(
-                id=UUID("00000000-0000-0000-0000-000000000001"),
-                segment_index=0,
-                start_time_seconds=0.0,
-                end_time_seconds=120.0,
-                detection_confidence=0.82,
-                effective_detection_mode=detection_mode,
-                detection_signals=[],
-                fallback_reason=fallback_reason,
-                exported_file_path=None,
-                export_status=ExportStatus.NOT_EXPORTED,
-                user_adjusted=False,
-            ),
-        ]
+    def _require_project(self, project_id: str) -> ConcertProject:
+        project = self._project_store.load_project(project_id)
+        if project is None:
+            raise ValueError(f"プロジェクトが見つかりません: {project_id}")
+        return project
 
 
 class _PreviewWorkflowService:
@@ -163,18 +312,23 @@ class _UploadWorkflowService:
 
 
 class _SettingsWorkflowService:
-    """In-memory settings workflow stub."""
+    """Settings workflow backed by persistent configuration storage."""
 
-    def __init__(self) -> None:
-        self._config = ProjectConfig()
+    def __init__(self, config_store: JsonConfig | None = None) -> None:
+        self._config_store = config_store
+        self._config = self._config_store.load_config() if self._config_store is not None else ProjectConfig()
         self._artifact_policy = "auto-clean"
         self._last_purged: str | None = None
 
     def load_config(self) -> ProjectConfig:
+        if self._config_store is not None:
+            self._config = self._config_store.load_config()
         return ProjectConfig(**asdict(self._config))
 
     def save_config(self, config: ProjectConfig) -> None:
         self._config = config
+        if self._config_store is not None:
+            self._config_store.save_config(config)
 
     def authenticate(self) -> bool:
         return True
@@ -191,7 +345,7 @@ class _SettingsWorkflowService:
 
 def launch() -> None:
     """Launch the Flet desktop application."""
-    ft.app(target=_build_page)
+    ft.app(target=_build_page, view=ft.AppView.FLET_APP)
 
 
 def _build_page(page: ft.Page) -> None:
@@ -203,16 +357,32 @@ def _build_page(page: ft.Page) -> None:
         page.window.height = 800
     page.padding = 16
 
+    base_dir = _default_base_dir()
+    project_store = JsonProjectStore(base_dir)
+    checkpoint_store = JsonCheckpointStore(base_dir)
+    checkpoint_manager = CheckpointManager(checkpoint_store)
+    video_io = FFmpegTranscoder()
+    config_store = JsonConfig(base_dir)
+    pipeline = PipelineOrchestrator(
+        video_io=video_io,
+        checkpoint_manager=checkpoint_manager,
+        project_store=project_store,
+    )
+
     app_state = _AppState()
-    settings_workflow = _SettingsWorkflowService()
+    settings_workflow = _SettingsWorkflowService(config_store=config_store)
     settings_vm = SettingsViewModel(workflow=settings_workflow)
-    load_workflow = _LoadWorkflowService(app_state)
-    load_vm = LoadViewModel(workflow=load_workflow, output_directory=Path.cwd() / "output")
+    load_workflow = _LoadWorkflowService(
+        app_state,
+        project_store=project_store,
+        video_io=video_io,
+        config_store=config_store,
+    )
+    load_vm = LoadViewModel(workflow=load_workflow, output_directory=base_dir / "output")
     process_vm = ProcessViewModel(
         workflow=_ProcessingWorkflowService(
-            yolo_enabled_provider=lambda: settings_vm.config.enable_yolo_detection
-            if settings_vm.config is not None
-            else True,
+            project_store=project_store,
+            pipeline=pipeline,
         ),
     )
     preview_vm = PreviewViewModel(

@@ -51,7 +51,13 @@ def build_load_view(
     def on_create_project(_: ft.ControlEvent) -> None:
         try:
             vm.create_project()
-        except ValueError:
+        except ValueError as exc:
+            if not vm.validation_errors:
+                vm.validation_errors = [str(exc)]
+            refresh_lists()
+            return
+        except Exception as exc:
+            vm.validation_errors = [f"プロジェクト作成に失敗しました: {exc}"]
             refresh_lists()
             return
         refresh_lists()
