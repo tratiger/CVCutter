@@ -126,25 +126,26 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-007**: The system MUST provide clear user-facing error messages that distinguish recoverable issues from blocking failures.
 - **FR-008**: The system MUST provide guided setup flow for job configuration, including contextual validation and correction guidance.
 - **FR-009**: The system MUST provide live progress visibility including current stage, completed stages, pending stages, and last error summary.
-- **FR-010**: The system MUST detect candidate performance boundaries using combined evidence from audio transitions (for example applause/silence/performance-energy patterns) and visual performance cues (for example posture/gesture/instrument-readiness indicators).
+- **FR-010**: The system MUST detect candidate performance boundaries using combined audio-transition and visual-cue evidence when both are available, and MUST fall back to single-modality detection with reduced-confidence labeling when one modality is unavailable.
 - **FR-011**: The system MUST provide confidence indicators for detected boundaries and require operator confirmation when confidence is below a defined threshold.
 - **FR-012**: The system MUST align multiple audio sources automatically and support switchable tuning modes: simple controls (level/noise sliders) and waveform-preview controls (visual alignment with manual offset adjustment).
-- **FR-013**: The system MUST support processing of long recordings without requiring full-recording in-memory loading.
+- **FR-013**: The system MUST support processing of long recordings without full-video/frame in-memory loading and MUST keep memory-bounded behavior for audio synchronization workloads.
 - **FR-014**: The system MUST map validated metadata to each finalized output segment before publishing.
-- **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable.
+- **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable and configurable display duration.
 - **FR-016**: The system MUST restrict external integrations to approved project services (YouTube, Google Forms, and configured AI provider services) and reject unapproved integrations by default.
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata.
 - **FR-020**: The system MUST provide a packaged runtime experience suitable for non-engineering users to install and run on supported workstation environments without manual developer setup.
-- **FR-021**: The system MUST detect configuration changes made after checkpoint creation and require explicit checkpoint invalidation or cancellation before resume.
-- **FR-022**: The system MUST allow operators to configure the low-confidence threshold per job, with a default threshold of 70%.
+- **FR-021**: The system MUST detect configuration changes made after checkpoint creation and apply a defined configuration-to-stage dependency map to require explicit checkpoint invalidation or cancellation before resume.
+- **FR-022**: The system MUST allow operators to configure the low-confidence boundary-detection threshold per job on a 0-100 scale, with a default threshold of 70.
 - **FR-023**: The system MUST continue processing when optional hardware acceleration is unavailable by using a CPU-compatible execution path.
 - **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
-- **FR-025**: The system MUST keep median audio alignment error within 80 ms on the validation dataset, or mark outputs for manual timing correction.
+- **FR-025**: In the defined synchronization validation dataset, at least 90% of outputs MUST achieve median audio alignment error <= 80 ms without manual correction, and all remaining outputs MUST be flagged for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator prompt to switch strategy.
-- **FR-027**: The system MUST block installation on unsupported workstation environments and provide explicit supported-environment guidance.
+- **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows 10/11 64-bit environments.
 - **FR-028**: The system MUST verify required local analysis models are available before running content-based classification and visual-cue boundary detection, and surface remediation guidance if unavailable.
+- **FR-029**: The system MUST score classification confidence on a 0-100 scale and treat a result as confident only when the top candidate score is >= 70 and at least 10 points above the next candidate.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -157,25 +158,26 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-007** is accepted when every surfaced error includes a recoverability label and next action.
 - **FR-008** is accepted when a first-time operator can complete setup with step-level validation prompts.
 - **FR-009** is accepted when progress view shows current, completed, pending, and last-error information.
-- **FR-010** is accepted when boundary candidates are generated using both audio-transition and visual-cue evidence sources.
+- **FR-010** is accepted when both evidence sources are used when available, and missing-modality runs are labeled reduced-confidence and routed to operator confirmation.
 - **FR-011** is accepted when below-threshold candidates require explicit operator confirmation.
 - **FR-012** is accepted when operators can switch between slider-based tuning and waveform-preview/manual-offset tuning modes.
-- **FR-013** is accepted when long recordings complete without full-file memory loading assumptions.
+- **FR-013** is accepted when long recordings complete without full-video/frame in-memory loading and with bounded audio-sync memory usage.
 - **FR-014** is accepted when each finalized segment receives validated metadata before publishing.
-- **FR-015** is accepted when opening-title insertion can be toggled per output.
+- **FR-015** is accepted when opening-title insertion can be toggled per output and display duration can be configured.
 - **FR-016** is accepted when non-approved destinations are rejected before external calls are made.
 - **FR-017** is accepted when transient failures retry safely and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
 - **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata.
 - **FR-020** is accepted when non-engineering users can install and launch without developer tooling steps.
-- **FR-021** is accepted when post-checkpoint config changes trigger explicit invalidate-or-cancel decisions.
-- **FR-022** is accepted when low-confidence threshold is editable per job and defaults to 70%.
+- **FR-021** is accepted when post-checkpoint config changes trigger explicit invalidate-or-cancel decisions based on a documented stage-dependency mapping.
+- **FR-022** is accepted when the boundary-confidence threshold is editable on a 0-100 scale and defaults to 70.
 - **FR-023** is accepted when jobs run to completion on environments without hardware acceleration.
 - **FR-024** is accepted when structured start/completion/failure events are present for each core step.
-- **FR-025** is accepted when validation runs show median alignment error <= 80 ms or outputs are flagged for manual correction.
+- **FR-025** is accepted when >= 90% of validation outputs meet <= 80 ms median alignment error automatically and the remaining outputs are flagged for manual correction.
 - **FR-026** is accepted when zero-match classification results trigger a guided strategy-switch prompt.
-- **FR-027** is accepted when unsupported installation attempts are blocked with clear guidance on supported environments.
+- **FR-027** is accepted when installation attempts outside Windows 10/11 64-bit are blocked with clear supported-environment guidance.
 - **FR-028** is accepted when missing local analysis models are detected before execution and users receive actionable remediation guidance.
+- **FR-029** is accepted when classification confidence uses the defined 0-100 scoring rule and no-confident-match conditions follow the fixed-threshold-plus-margin criteria.
 
 ### Constitutional Requirements *(mandatory)*
 
@@ -216,6 +218,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - "Low-confidence" boundary review uses a default threshold of 70% unless the operator sets another value.
 - UI framework migration from customtkinter to Flet is in scope for this refactor and part of setup experience modernization.
 - A single workstation instance processes one active job at a time.
+- Packaged delivery for the migrated UI targets standalone Windows desktop distribution that does not require developer toolchains on end-user machines.
 
 ## Dependencies
 
@@ -232,6 +235,15 @@ As a non-engineering user, I can install the packaged application on a supported
   - Workstation environment with sufficient storage for intermediate media outputs and retry-safe run history retention.
   - Supported installation targets are Windows 10/11 64-bit workstations.
 
+## Validation Dataset Definition
+
+- **Synchronization/Segmentation Validation Set**:
+  - 20 long-recording runs total.
+  - At least 200 performance-segment candidates with ground-truth start/end boundaries.
+  - Coverage of mixed camera conditions (stable tripod, handheld motion, and partial performer occlusion).
+  - Coverage of multi-source audio setups (minimum 2 sources and maximum 4 sources per run).
+- This dataset definition is the reference set for FR-025, SC-002, SC-003, and SC-008 measurements.
+
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
@@ -243,4 +255,4 @@ As a non-engineering user, I can install the packaged application on a supported
 - **SC-005**: At least 98% of transient publishing failures recover automatically within 15 minutes without duplicate published outputs, measured across at least 100 injected transient-failure publish attempts.
 - **SC-006**: Pilot operators rate workflow transparency and error guidance at 4.0/5.0 or higher in post-run feedback, measured across at least 10 respondents.
 - **SC-007**: At least 90% of first-time non-engineering users can install and open the packaged application in under 10 minutes, measured across at least 10 participants.
-- **SC-008**: In the 20-run synchronization validation set, 100% of outputs either achieve median alignment error <= 80 ms or are clearly flagged for manual timing correction.
+- **SC-008**: In the 20-run synchronization validation set, at least 90% of outputs achieve median alignment error <= 80 ms without manual correction, and all remaining outputs are clearly flagged for manual timing correction.
