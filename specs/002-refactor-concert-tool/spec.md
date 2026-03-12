@@ -38,11 +38,13 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 
 **Acceptance Scenarios**:
 
-1. **Given** a first-time operator, **When** they create a new job, **Then** required inputs are collected step-by-step with immediate validation feedback.
+1. **Given** a first-time operator, **When** they create a new job, **Then** required inputs (including program/song-list metadata) are collected step-by-step with immediate validation feedback.
 2. **Given** a running job, **When** the operator opens the progress view, **Then** current stage, completed stages, and pending stages are clearly shown.
 3. **Given** a recoverable configuration issue, **When** processing stops, **Then** the operator receives corrective guidance and can continue without recreating the job.
 4. **Given** a new job configuration, **When** the operator chooses a performance classification strategy, **Then** the selected strategy is saved and used for that job.
 5. **Given** the selected classification strategy returns no confident match, **When** results are presented, **Then** the operator receives a guided prompt to switch strategy or adjust matching inputs.
+6. **Given** content-based classification is selected, **When** pre-performance speech is transcribed and matched to the program/song list, **Then** the best match is proposed with confidence and traceable source context.
+7. **Given** required local analysis models are missing or unavailable, **When** the operator starts model-dependent processing, **Then** execution is blocked and actionable remediation guidance is shown before processing continues.
 
 ---
 
@@ -62,6 +64,7 @@ As an editor, I receive high-quality automatic performance segment boundaries an
 4. **Given** audio tuning is required, **When** the operator opens tuning controls, **Then** they can switch between simple controls (level/noise sliders) and waveform-preview controls (visual alignment with manual offset adjustment) before export.
 5. **Given** the operator changes the low-confidence threshold for a job, **When** detection results are refreshed, **Then** the set of items requiring confirmation follows the updated threshold.
 6. **Given** a validation sample with known timing offsets, **When** synchronization completes, **Then** alignment error stays within the defined quality tolerance or the output is flagged for manual correction.
+7. **Given** multimodal boundary detection runs, **When** audio applause/silence transitions and visual performance cues disagree, **Then** the system presents confidence-weighted candidates for operator confirmation.
 
 ---
 
@@ -108,12 +111,13 @@ As a non-engineering user, I can install the packaged application on a supported
 - Operator switches processing profiles mid-job and attempts to resume from an older checkpoint.
 - Confidence scores cluster near the low-confidence threshold and require predictable operator-review behavior.
 - Installation is attempted on an unsupported workstation environment.
+- Required local analysis models are missing, corrupted, or incompatible at runtime.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST allow operators to create and save a job draft that links source media, metadata inputs, and output preferences.
+- **FR-001**: The system MUST allow operators to create and save a job draft that links source media, metadata inputs (including program/song-list metadata), and output preferences.
 - **FR-002**: The system MUST validate required job inputs before execution and block execution until critical fields are complete.
 - **FR-003**: The system MUST execute processing as named, observable stages with explicit stage-level status.
 - **FR-004**: The system MUST persist checkpoint state after each completed stage so interrupted jobs can resume.
@@ -122,7 +126,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-007**: The system MUST provide clear user-facing error messages that distinguish recoverable issues from blocking failures.
 - **FR-008**: The system MUST provide guided setup flow for job configuration, including contextual validation and correction guidance.
 - **FR-009**: The system MUST provide live progress visibility including current stage, completed stages, pending stages, and last error summary.
-- **FR-010**: The system MUST detect candidate performance boundaries using combined evidence from available audio and video signals.
+- **FR-010**: The system MUST detect candidate performance boundaries using combined evidence from audio transitions (for example applause/silence/performance-energy patterns) and visual performance cues (for example posture/gesture/instrument-readiness indicators).
 - **FR-011**: The system MUST provide confidence indicators for detected boundaries and require operator confirmation when confidence is below a defined threshold.
 - **FR-012**: The system MUST align multiple audio sources automatically and support switchable tuning modes: simple controls (level/noise sliders) and waveform-preview controls (visual alignment with manual offset adjustment).
 - **FR-013**: The system MUST support processing of long recordings without requiring full-recording in-memory loading.
@@ -131,7 +135,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-016**: The system MUST restrict external integrations to approved project services (YouTube, Google Forms, and configured AI provider services) and reject unapproved integrations by default.
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
-- **FR-019**: Operators MUST be able to select a classification strategy for performance identification (content-based or timestamp-based) per job.
+- **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata.
 - **FR-020**: The system MUST provide a packaged runtime experience suitable for non-engineering users to install and run on supported workstation environments without manual developer setup.
 - **FR-021**: The system MUST detect configuration changes made after checkpoint creation and require explicit checkpoint invalidation or cancellation before resume.
 - **FR-022**: The system MUST allow operators to configure the low-confidence threshold per job, with a default threshold of 70%.
@@ -140,6 +144,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-025**: The system MUST keep median audio alignment error within 80 ms on the validation dataset, or mark outputs for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator prompt to switch strategy.
 - **FR-027**: The system MUST block installation on unsupported workstation environments and provide explicit supported-environment guidance.
+- **FR-028**: The system MUST verify required local analysis models are available before running content-based classification and visual-cue boundary detection, and surface remediation guidance if unavailable.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -152,7 +157,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-007** is accepted when every surfaced error includes a recoverability label and next action.
 - **FR-008** is accepted when a first-time operator can complete setup with step-level validation prompts.
 - **FR-009** is accepted when progress view shows current, completed, pending, and last-error information.
-- **FR-010** is accepted when candidate boundaries are generated from available audio and video evidence.
+- **FR-010** is accepted when boundary candidates are generated using both audio-transition and visual-cue evidence sources.
 - **FR-011** is accepted when below-threshold candidates require explicit operator confirmation.
 - **FR-012** is accepted when operators can switch between slider-based tuning and waveform-preview/manual-offset tuning modes.
 - **FR-013** is accepted when long recordings complete without full-file memory loading assumptions.
@@ -161,7 +166,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-016** is accepted when non-approved destinations are rejected before external calls are made.
 - **FR-017** is accepted when transient failures retry safely and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
-- **FR-019** is accepted when selected classification strategy is persisted and used for the job.
+- **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata.
 - **FR-020** is accepted when non-engineering users can install and launch without developer tooling steps.
 - **FR-021** is accepted when post-checkpoint config changes trigger explicit invalidate-or-cancel decisions.
 - **FR-022** is accepted when low-confidence threshold is editable per job and defaults to 70%.
@@ -170,6 +175,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-025** is accepted when validation runs show median alignment error <= 80 ms or outputs are flagged for manual correction.
 - **FR-026** is accepted when zero-match classification results trigger a guided strategy-switch prompt.
 - **FR-027** is accepted when unsupported installation attempts are blocked with clear guidance on supported environments.
+- **FR-028** is accepted when missing local analysis models are detected before execution and users receive actionable remediation guidance.
 
 ### Constitutional Requirements *(mandatory)*
 
@@ -209,6 +215,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit).
 - "Low-confidence" boundary review uses a default threshold of 70% unless the operator sets another value.
 - UI framework migration from customtkinter to Flet is in scope for this refactor and part of setup experience modernization.
+- A single workstation instance processes one active job at a time.
 
 ## Dependencies
 
@@ -218,6 +225,9 @@ As a non-engineering user, I can install the packaged application on a supported
   - Configured AI provider service for automated classification tasks.
 - **Validation Assets**:
   - Historical concert recordings and ground-truth annotations for segmentation and sync quality checks.
+- **Local Processing Dependencies**:
+  - Local speech-transcription model assets for pre-performance content-based classification.
+  - Local visual-cue model assets for performance-boundary detection.
 - **Operational Prerequisites**:
   - Workstation environment with sufficient storage for intermediate media outputs and retry-safe run history retention.
   - Supported installation targets are Windows 10/11 64-bit workstations.

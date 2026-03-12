@@ -35,6 +35,6 @@
 - Validation iteration 2 resolved structural gaps by adding missing user scenarios, dependency inventory, constitutional verification plan, and FR acceptance coverage.
 - Validation iteration 3 aligned constitution-required quality gates, manual-test protocol evidence fields, additional traceability requirement (FR-027), and measurable sampling details in success criteria.
 - No unresolved placeholders or `[NEEDS CLARIFICATION]` markers were found.
-- Spec evidence includes independently testable user stories (P1-P5), functional requirements (FR-001 to FR-027), explicit assumptions/dependencies, and measurable success criteria (SC-001 to SC-008).
+- Spec evidence includes independently testable user stories (P1-P5), functional requirements (FR-001 to FR-028), explicit assumptions/dependencies, and measurable success criteria (SC-001 to SC-008).
 - "Feature meets measurable outcomes" remains unchecked because runtime outcome evidence is produced during implementation/validation, not at specification drafting time.
 - Content-quality items related to implementation detail and non-technical wording remain intentionally unchecked because this repository's constitution requires explicit governance/tooling constraints in the spec.
