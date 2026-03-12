@@ -24,6 +24,7 @@ As an operator, I can run the core processing workflow (ingest, segmentation, au
 5. **Given** a completed or failed job, **When** the operator opens run history, **Then** stage transitions, retries, and outcomes are visible in chronological order.
 6. **Given** a workstation without optional hardware acceleration, **When** the operator starts processing, **Then** the workflow still runs using the fallback execution path.
 7. **Given** any core processing stage begins or ends, **When** diagnostics are reviewed, **Then** structured start/completion/failure events are present for that stage.
+8. **Given** a long recording on a memory-constrained workstation, **When** processing runs end-to-end, **Then** the job completes without memory exhaustion failure.
 
 ---
 
@@ -41,6 +42,7 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 2. **Given** a running job, **When** the operator opens the progress view, **Then** current stage, completed stages, and pending stages are clearly shown.
 3. **Given** a recoverable configuration issue, **When** processing stops, **Then** the operator receives corrective guidance and can continue without recreating the job.
 4. **Given** a new job configuration, **When** the operator chooses a performance classification strategy, **Then** the selected strategy is saved and used for that job.
+5. **Given** the selected classification strategy returns no confident match, **When** results are presented, **Then** the operator receives a guided prompt to switch strategy or adjust matching inputs.
 
 ---
 
@@ -137,6 +139,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
 - **FR-025**: The system MUST keep median audio alignment error within 80 ms on the validation dataset, or mark outputs for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator prompt to switch strategy.
+- **FR-027**: The system MUST block installation on unsupported workstation environments and provide explicit supported-environment guidance.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -166,24 +169,27 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-024** is accepted when structured start/completion/failure events are present for each core step.
 - **FR-025** is accepted when validation runs show median alignment error <= 80 ms or outputs are flagged for manual correction.
 - **FR-026** is accepted when zero-match classification results trigger a guided strategy-switch prompt.
+- **FR-027** is accepted when unsupported installation attempts are blocked with clear guidance on supported environments.
 
 ### Constitutional Requirements *(mandatory)*
 
 - **CR-001 (Layered Design)**: The feature MUST define boundaries between UI, application orchestration, domain logic, and infrastructure adapters.
 - **CR-002 (Stream-First Media)**: For long-media processing, the feature MUST define incremental memory-aware execution and MUST include a fallback path when optional acceleration is unavailable.
-- **CR-003 (TDD Evidence)**: The feature MUST define how failing tests are authored before implementation, how regression tests are added for discovered defects, and how user-approved manual-judgment test protocols are captured before executing human-reviewed core-module tests.
+- **CR-003 (TDD Evidence)**: The feature MUST define how failing tests are authored before implementation, how regression tests are added for discovered defects, and how manual-judgment test protocols capture approver identity, date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
 - **CR-004 (Resume & Retry)**: For multi-step workflows and external calls, the feature MUST define resumable checkpoints and safe retry behavior that avoids duplicate side effects.
 - **CR-005 (Integration Scope)**: The feature MUST list required external services and justify any addition beyond approved project integrations.
-- **CR-006 (Quality Gates)**: Implementation validation MUST include linting, static analysis, and automated coverage-based test gates as defined by project governance.
+- **CR-006 (Quality Gates)**: Implementation validation MUST include successful `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` runs.
+- **CR-007 (Simplicity)**: The feature MUST favor the simplest design that satisfies current requirements and avoid speculative abstractions.
 
 ### Constitutional Verification Plan
 
 - **CR-001 Verification**: Planning artifacts MUST include explicit module-boundary definitions for UI, orchestration, domain, and infrastructure.
 - **CR-002 Verification**: Test plan MUST include long-media execution on memory-constrained environments and a no-acceleration fallback run.
-- **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a reviewer-approved manual test protocol for segmentation/synchronization quality checks.
+- **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a manual test artifact containing approver identity, date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
 - **CR-004 Verification**: Validation MUST include interrupted-run resume tests and duplicate-prevention checks across retries.
 - **CR-005 Verification**: Dependency inventory MUST include approved services and rationale for any additional integration request.
-- **CR-006 Verification**: Delivery checklist MUST show successful completion of required linting, static-analysis, and coverage-based test gates.
+- **CR-006 Verification**: Delivery checklist MUST include command outputs for `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov`.
+- **CR-007 Verification**: Planning notes MUST justify why selected architecture is the minimum structure needed and identify rejected speculative abstractions.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -202,6 +208,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Existing core capabilities for metadata intake and document generation remain in scope and are refactored for reliability rather than replaced by new business behavior.
 - Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit).
 - "Low-confidence" boundary review uses a default threshold of 70% unless the operator sets another value.
+- UI framework migration from customtkinter to Flet is in scope for this refactor and part of setup experience modernization.
 
 ## Dependencies
 
@@ -219,11 +226,11 @@ As a non-engineering user, I can install the packaged application on a supported
 
 ### Measurable Outcomes
 
-- **SC-001**: At least 95% of interrupted jobs resume from the latest checkpoint and complete without recreating job state.
+- **SC-001**: At least 95% of interrupted jobs resume from the latest checkpoint and complete without recreating job state, measured over at least 50 interruption-injection runs.
 - **SC-002**: In a 20-run long-recording validation set, zero runs fail due to memory exhaustion.
-- **SC-003**: At least 85% of automatically proposed performance segments (start/end boundary pair) are accepted without manual boundary edits.
-- **SC-004**: At least 90% of first-time operators can configure and launch a valid job within 8 minutes.
-- **SC-005**: At least 98% of transient publishing failures recover automatically within 15 minutes without duplicate published outputs.
-- **SC-006**: Pilot operators rate workflow transparency and error guidance at 4.0/5.0 or higher in post-run feedback.
-- **SC-007**: At least 90% of first-time non-engineering users can install and open the packaged application in under 10 minutes.
-- **SC-008**: In validation runs, at least 90% of synchronized outputs achieve median alignment error <= 80 ms or are clearly flagged for manual timing correction.
+- **SC-003**: At least 85% of automatically proposed performance segments (start/end boundary pair) are accepted without manual boundary edits, measured over at least 200 segment candidates.
+- **SC-004**: At least 90% of first-time operators can configure and launch a valid job within 8 minutes, measured across at least 10 participants.
+- **SC-005**: At least 98% of transient publishing failures recover automatically within 15 minutes without duplicate published outputs, measured across at least 100 injected transient-failure publish attempts.
+- **SC-006**: Pilot operators rate workflow transparency and error guidance at 4.0/5.0 or higher in post-run feedback, measured across at least 10 respondents.
+- **SC-007**: At least 90% of first-time non-engineering users can install and open the packaged application in under 10 minutes, measured across at least 10 participants.
+- **SC-008**: In the 20-run synchronization validation set, 100% of outputs either achieve median alignment error <= 80 ms or are clearly flagged for manual timing correction.
