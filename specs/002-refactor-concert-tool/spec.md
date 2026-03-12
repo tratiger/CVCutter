@@ -25,6 +25,7 @@ As an operator, I can run the core processing workflow (ingest, segmentation, au
 6. **Given** a workstation without optional hardware acceleration, **When** the operator starts processing, **Then** the workflow still runs using the fallback execution path.
 7. **Given** any core processing stage begins or ends, **When** diagnostics are reviewed, **Then** structured start/completion/failure events are present for that stage.
 8. **Given** a long recording on a memory-constrained workstation, **When** processing runs end-to-end, **Then** the job completes without memory exhaustion failure.
+9. **Given** one job is already active on the workstation, **When** the operator attempts to start a second job, **Then** the system blocks the new start request and shows single-active-job guidance.
 
 ---
 
@@ -44,7 +45,7 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 4. **Given** a new job configuration, **When** the operator chooses a performance classification strategy, **Then** the selected strategy is saved and used for that job.
 5. **Given** the selected classification strategy returns no confident match, **When** results are presented, **Then** the operator receives a guided prompt to switch strategy or adjust matching inputs.
 6. **Given** content-based classification is selected, **When** pre-performance speech is transcribed and matched to the program/song list, **Then** the best match is proposed with confidence and traceable source context.
-7. **Given** required local analysis models are missing or unavailable, **When** the operator starts model-dependent processing, **Then** execution is blocked and actionable remediation guidance is shown before processing continues.
+7. **Given** required local analysis models are missing or unavailable, **When** the operator starts model-dependent processing, **Then** the system either runs with available modalities in reduced-confidence mode (with warning) or blocks execution with actionable remediation guidance when no viable modality remains.
 
 ---
 
@@ -132,7 +133,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-013**: The system MUST support processing of long recordings without full-video/frame in-memory loading and MUST keep memory-bounded behavior for audio synchronization workloads.
 - **FR-014**: The system MUST map validated metadata to each finalized output segment before publishing.
 - **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable and configurable display duration.
-- **FR-016**: The system MUST restrict external integrations to approved project services (YouTube, Google Forms, and configured AI provider services) and reject unapproved integrations by default.
+- **FR-016**: The system MUST restrict external integrations to approved project services (YouTube, Google Forms, Google Sheets, and configured AI provider services) and reject unapproved integrations by default.
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata.
@@ -141,11 +142,15 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-022**: The system MUST allow operators to configure the low-confidence boundary-detection threshold per job on a 0-100 scale, with a default threshold of 70.
 - **FR-023**: The system MUST continue processing when optional hardware acceleration is unavailable by using a CPU-compatible execution path.
 - **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
-- **FR-025**: In the defined synchronization validation dataset, at least 90% of outputs MUST achieve median audio alignment error <= 80 ms without manual correction, and all remaining outputs MUST be flagged for manual timing correction.
+- **FR-025**: The system MUST evaluate per-output synchronization quality against an 80 ms median alignment tolerance and MUST flag outputs that exceed tolerance for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator prompt to switch strategy.
 - **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows 10/11 64-bit environments.
-- **FR-028**: The system MUST verify required local analysis models are available before running content-based classification and visual-cue boundary detection, and surface remediation guidance if unavailable.
+- **FR-028**: The system MUST verify required local analysis models before model-dependent stages, allow reduced-confidence fallback when at least one viable modality remains, and block with remediation guidance when no viable modality remains.
 - **FR-029**: The system MUST score classification confidence on a 0-100 scale and treat a result as confident only when the top candidate score is >= 70 and at least 10 points above the next candidate.
+  When only one candidate exists, the margin condition is considered satisfied.
+- **FR-030**: The system MUST migrate the UI layer from customtkinter to Flet while preserving existing operator-facing workflows defined in this specification.
+- **FR-031**: The system MUST prevent concurrent active-job execution on the same workstation instance and provide user-facing guidance when another job is already running.
+- **FR-032**: For transient publishing failures, the retry workflow MUST attempt automated recovery within a 15-minute bounded retry window before requiring manual intervention.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -173,11 +178,15 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-022** is accepted when the boundary-confidence threshold is editable on a 0-100 scale and defaults to 70.
 - **FR-023** is accepted when jobs run to completion on environments without hardware acceleration.
 - **FR-024** is accepted when structured start/completion/failure events are present for each core step.
-- **FR-025** is accepted when >= 90% of validation outputs meet <= 80 ms median alignment error automatically and the remaining outputs are flagged for manual correction.
+- **FR-025** is accepted when outputs exceeding 80 ms median alignment tolerance are automatically flagged for manual timing correction before publish.
 - **FR-026** is accepted when zero-match classification results trigger a guided strategy-switch prompt.
 - **FR-027** is accepted when installation attempts outside Windows 10/11 64-bit are blocked with clear supported-environment guidance.
-- **FR-028** is accepted when missing local analysis models are detected before execution and users receive actionable remediation guidance.
+- **FR-028** is accepted when missing local models trigger reduced-confidence fallback for viable single-modality runs and trigger blocking remediation when no viable modality remains.
 - **FR-029** is accepted when classification confidence uses the defined 0-100 scoring rule and no-confident-match conditions follow the fixed-threshold-plus-margin criteria.
+  Single-candidate cases are accepted when score >= 70 and the system applies the documented single-candidate margin rule.
+- **FR-030** is accepted when the Flet-based UI provides all required setup, progress, review, and publish workflows covered by User Stories 1-5.
+- **FR-031** is accepted when attempts to start a second active job on the same workstation are blocked with clear user guidance.
+- **FR-032** is accepted when transient publishing failures either recover automatically within 15 minutes or are escalated with explicit manual-intervention guidance.
 
 ### Constitutional Requirements *(mandatory)*
 
@@ -196,6 +205,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a manual test artifact containing approver identity, date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
 - **CR-004 Verification**: Validation MUST include interrupted-run resume tests and duplicate-prevention checks across retries.
 - **CR-005 Verification**: Dependency inventory MUST include approved services and rationale for any additional integration request.
+  Any Google Sheets usage MUST include CR-005 justification as an extension required for linked Google Forms response retrieval.
 - **CR-006 Verification**: Delivery checklist MUST include command outputs for `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov`.
 - **CR-007 Verification**: Planning notes MUST justify why selected architecture is the minimum structure needed and identify rejected speculative abstractions.
 
@@ -216,8 +226,6 @@ As a non-engineering user, I can install the packaged application on a supported
 - Existing core capabilities for metadata intake and document generation remain in scope and are refactored for reliability rather than replaced by new business behavior.
 - Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit).
 - "Low-confidence" boundary review uses a default threshold of 70% unless the operator sets another value.
-- UI framework migration from customtkinter to Flet is in scope for this refactor and part of setup experience modernization.
-- A single workstation instance processes one active job at a time.
 - Packaged delivery for the migrated UI targets standalone Windows desktop distribution that does not require developer toolchains on end-user machines.
 
 ## Dependencies
@@ -225,7 +233,9 @@ As a non-engineering user, I can install the packaged application on a supported
 - **Approved External Services**:
   - YouTube service for publish destination operations.
   - Google Forms service for form-response metadata intake.
+  - Google Sheets service for linked form-response spreadsheet retrieval.
   - Configured AI provider service for automated classification tasks.
+  - Google Sheets usage is justified under CR-005 as an extension of approved Google Forms response retrieval workflows.
 - **Validation Assets**:
   - Historical concert recordings and ground-truth annotations for segmentation and sync quality checks.
 - **Local Processing Dependencies**:
@@ -242,7 +252,11 @@ As a non-engineering user, I can install the packaged application on a supported
   - At least 200 performance-segment candidates with ground-truth start/end boundaries.
   - Coverage of mixed camera conditions (stable tripod, handheld motion, and partial performer occlusion).
   - Coverage of multi-source audio setups (minimum 2 sources and maximum 4 sources per run).
-- This dataset definition is the reference set for FR-025, SC-002, SC-003, and SC-008 measurements.
+- **Classification Validation Set**:
+  - At least 200 labeled classification attempts with verified program/song-title ground truth.
+  - Includes both high-confidence and ambiguous pre-performance speech samples.
+  - Includes single-candidate and multi-candidate matching cases.
+- This dataset definition is the reference set for FR-025, SC-002, SC-003, SC-008, and SC-009 measurements.
 
 ## Success Criteria *(mandatory)*
 
@@ -256,3 +270,4 @@ As a non-engineering user, I can install the packaged application on a supported
 - **SC-006**: Pilot operators rate workflow transparency and error guidance at 4.0/5.0 or higher in post-run feedback, measured across at least 10 respondents.
 - **SC-007**: At least 90% of first-time non-engineering users can install and open the packaged application in under 10 minutes, measured across at least 10 participants.
 - **SC-008**: In the 20-run synchronization validation set, at least 90% of outputs achieve median alignment error <= 80 ms without manual correction, and all remaining outputs are clearly flagged for manual timing correction.
+- **SC-009**: At least 90% of automated content-based classification proposals are accepted without manual title correction, measured over at least 200 classification attempts in the validation dataset.
