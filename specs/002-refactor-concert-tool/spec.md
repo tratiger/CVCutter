@@ -46,6 +46,7 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 5. **Given** the selected classification strategy returns no confident match, **When** results are presented, **Then** the operator receives a guided prompt to switch strategy or adjust matching inputs.
 6. **Given** content-based classification is selected, **When** pre-performance speech is transcribed and matched to the program/song list, **Then** the best match is proposed with confidence and traceable source context.
 7. **Given** required local analysis models are missing or unavailable, **When** the operator starts model-dependent processing, **Then** the system either runs with available modalities in reduced-confidence mode (with warning) or blocks execution with actionable remediation guidance when no viable modality remains.
+8. **Given** timestamp-based classification is selected and recording-time metadata is available, **When** classification runs, **Then** performances are mapped using recording-time metadata and the resulting confidence is shown for operator review.
 
 ---
 
@@ -148,9 +149,10 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-028**: The system MUST verify required local analysis models before model-dependent stages, allow reduced-confidence fallback when at least one viable modality remains, and block with remediation guidance when no viable modality remains.
 - **FR-029**: The system MUST score classification confidence on a 0-100 scale and treat a result as confident only when the top candidate score is >= 70 and at least 10 points above the next candidate.
   When only one candidate exists, the margin condition is considered satisfied.
-- **FR-030**: The system MUST migrate the UI layer from customtkinter to Flet while preserving existing operator-facing workflows defined in this specification.
+- **FR-030**: The system MUST migrate the UI layer from customtkinter to Flet and implement all operator-facing workflows defined in this specification.
 - **FR-031**: The system MUST prevent concurrent active-job execution on the same workstation instance and provide user-facing guidance when another job is already running.
-- **FR-032**: For transient publishing failures, the retry workflow MUST attempt automated recovery within a 15-minute bounded retry window before requiring manual intervention.
+- **FR-032**: For transient publishing failures, the retry workflow MUST attempt automated recovery within a 15-minute window per output item, measured from the first transient failure event, before requiring manual intervention.
+- **FR-033**: When audio-transition and visual-cue evidence disagree in boundary detection, the system MUST present confidence-weighted modality candidates for operator confirmation.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -163,7 +165,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-007** is accepted when every surfaced error includes a recoverability label and next action.
 - **FR-008** is accepted when a first-time operator can complete setup with step-level validation prompts.
 - **FR-009** is accepted when progress view shows current, completed, pending, and last-error information.
-- **FR-010** is accepted when both evidence sources are used when available, and missing-modality runs are labeled reduced-confidence and routed to operator confirmation.
+- **FR-010** is accepted when both evidence sources are used when available, and missing-modality runs are labeled reduced-confidence so FR-011 threshold rules determine confirmation behavior.
 - **FR-011** is accepted when below-threshold candidates require explicit operator confirmation.
 - **FR-012** is accepted when operators can switch between slider-based tuning and waveform-preview/manual-offset tuning modes.
 - **FR-013** is accepted when long recordings complete without full-video/frame in-memory loading and with bounded audio-sync memory usage.
@@ -186,7 +188,8 @@ As a non-engineering user, I can install the packaged application on a supported
   Single-candidate cases are accepted when score >= 70 and the system applies the documented single-candidate margin rule.
 - **FR-030** is accepted when the Flet-based UI provides all required setup, progress, review, and publish workflows covered by User Stories 1-5.
 - **FR-031** is accepted when attempts to start a second active job on the same workstation are blocked with clear user guidance.
-- **FR-032** is accepted when transient publishing failures either recover automatically within 15 minutes or are escalated with explicit manual-intervention guidance.
+- **FR-032** is accepted when each output item either recovers automatically within 15 minutes of first transient failure or is escalated with explicit manual-intervention guidance.
+- **FR-033** is accepted when evidence-disagreement cases surface confidence-weighted modality candidates and require explicit operator confirmation.
 
 ### Constitutional Requirements *(mandatory)*
 

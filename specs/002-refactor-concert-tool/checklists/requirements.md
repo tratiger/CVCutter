@@ -6,7 +6,7 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs) *(Waived: constitution requires explicit governance/tooling declarations in this spec)*
+- [x] No implementation details (languages, frameworks, APIs) *(Waived: constitution requires explicit governance/tooling declarations and this spec explicitly scopes UI migration in FR-030)*
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders *(Waived for constitutional/governance sections; user-facing sections remain stakeholder-oriented)*
 - [x] All mandatory sections completed
@@ -27,14 +27,14 @@
 - [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria *(Ready gate satisfied by defined measurable criteria; runtime proof tracked in implementation validation)*
-- [x] No implementation details leak into specification *(Waived: implementation/tooling references are constitution-mandated)*
+- [x] No implementation details leak into specification *(Waived: implementation/tooling references are constitution-mandated, plus FR-030 is an explicit in-scope migration constraint)*
 
 ## Notes
 
 - Validation iteration 1 surfaced gaps in scope traceability, constitutional coverage, and checklist over-claims.
 - Validation iteration 2 resolved structural gaps by adding missing user scenarios, dependency inventory, constitutional verification plan, and FR acceptance coverage.
-- Validation iteration 3 aligned constitution-required quality gates, manual-test protocol evidence fields, additional traceability requirement (FR-027), and measurable sampling details in success criteria.
+- Validation iteration 3 aligned constitution-required quality gates, manual-test protocol evidence fields, additional traceability requirement (FR-018), and measurable sampling details in success criteria.
 - No unresolved placeholders or `[NEEDS CLARIFICATION]` markers were found.
-- Spec evidence includes independently testable user stories (P1-P5), functional requirements (FR-001 to FR-032), explicit assumptions/dependencies, and measurable success criteria (SC-001 to SC-009).
+- Spec evidence includes independently testable user stories (P1-P5), functional requirements (FR-001 to FR-033), explicit assumptions/dependencies, and measurable success criteria (SC-001 to SC-009).
 - Checklist waivers are explicitly marked inline where constitution-mandated governance/tooling detail must remain in the specification.
 - Runtime outcome proof is deferred to implementation validation, while planning readiness is satisfied by measurable criterion definitions.
