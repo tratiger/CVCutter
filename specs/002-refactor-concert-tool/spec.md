@@ -134,7 +134,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-013**: The system MUST support processing of long recordings without full-video/frame in-memory loading and MUST keep memory-bounded behavior for audio synchronization workloads.
 - **FR-014**: The system MUST map validated metadata to each finalized output segment before publishing.
 - **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable and configurable display duration.
-- **FR-016**: The system MUST restrict external integrations to approved project services (YouTube, Google Forms, Google Sheets, and configured AI provider services) and reject unapproved integrations by default.
+- **FR-016**: The system MUST restrict external integrations to approved project services (YouTube, Google Forms, and configured AI provider services) and reject unapproved integrations by default.
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata.
@@ -171,7 +171,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-013** is accepted when long recordings complete without full-video/frame in-memory loading and with bounded audio-sync memory usage.
 - **FR-014** is accepted when each finalized segment receives validated metadata before publishing.
 - **FR-015** is accepted when opening-title insertion can be toggled per output and display duration can be configured.
-- **FR-016** is accepted when non-approved destinations are rejected before external calls are made.
+- **FR-016** is accepted when destinations outside the approved list are rejected before external calls, unless a CR-005 exception is formally documented and added to the feature's approved-service inventory prior to runtime use.
 - **FR-017** is accepted when transient failures retry safely and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
 - **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata.
@@ -236,9 +236,10 @@ As a non-engineering user, I can install the packaged application on a supported
 - **Approved External Services**:
   - YouTube service for publish destination operations.
   - Google Forms service for form-response metadata intake.
-  - Google Sheets service for linked form-response spreadsheet retrieval.
   - Configured AI provider service for automated classification tasks.
-  - Google Sheets usage is justified under CR-005 as an extension of approved Google Forms response retrieval workflows.
+- **CR-005 Extension**:
+  - Google Sheets service for linked form-response spreadsheet retrieval is an explicitly justified extension of approved Google Forms response retrieval workflows.
+    Status: Approved for this feature as a CR-005 exception and recorded in this feature's approved-service inventory.
 - **Validation Assets**:
   - Historical concert recordings and ground-truth annotations for segmentation and sync quality checks.
 - **Local Processing Dependencies**:
