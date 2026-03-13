@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-refactor-concert-tool`  
 **Created**: 2026-03-12  
-**Status**: Draft  
+**Status**: Ready for Planning  
 **Input**: User description: "`@refact-plan.md specify` (large-scale refactor plan for concert video splitting, audio synchronization, and automated publishing workflow)"
 
 ## User Scenarios & Testing *(mandatory)*
