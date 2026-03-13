@@ -240,7 +240,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Validation datasets and pilot feedback sessions are available to evaluate segmentation and synchronization quality.
 - Existing core capabilities for metadata intake and document generation remain in scope and are refactored for reliability rather than replaced by new business behavior.
 - Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit).
-- "Low-confidence" boundary review uses a default threshold of 70% unless the operator sets another value.
+- "Low-confidence" boundary review uses a default threshold of 70 on a 0-100 scale unless the operator sets another value.
 - Packaged delivery for the migrated UI targets standalone Windows desktop distribution that does not require developer toolchains on end-user machines.
 
 ## Dependencies
