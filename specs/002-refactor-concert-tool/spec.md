@@ -26,6 +26,7 @@ As an operator, I can run the core processing workflow (ingest, segmentation, au
 7. **Given** any core processing stage begins or ends, **When** diagnostics are reviewed, **Then** structured start/completion/failure events are present for that stage.
 8. **Given** a long recording on a memory-constrained workstation, **When** processing runs end-to-end, **Then** the job completes without memory exhaustion failure.
 9. **Given** one job is already active on the workstation, **When** the operator attempts to start a second job, **Then** the system blocks the new start request and shows single-active-job guidance.
+10. **Given** the application was force-closed while a job was active, **When** the operator restarts the application, **Then** the system detects stale active state and transitions the job to a resumable state with resume guidance.
 
 ---
 
@@ -39,15 +40,16 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 
 **Acceptance Scenarios**:
 
-1. **Given** a first-time operator, **When** they create a new job, **Then** required inputs (including program/song-list metadata) are collected step-by-step with immediate validation feedback.
+1. **Given** a first-time operator, **When** they create a new job, **Then** required baseline inputs are collected step-by-step with immediate validation feedback, and strategy-specific metadata (including event schedule metadata for timestamp mode) is requested when needed.
 2. **Given** a running job, **When** the operator opens the progress view, **Then** current stage, completed stages, and pending stages are clearly shown.
 3. **Given** a recoverable configuration issue, **When** processing stops, **Then** the operator receives corrective guidance and can continue without recreating the job.
 4. **Given** a new job configuration, **When** the operator chooses a performance classification strategy, **Then** the selected strategy is saved and used for that job.
-5. **Given** the selected classification strategy returns no confident match, **When** results are presented, **Then** the operator receives a guided prompt to switch strategy or adjust matching inputs.
+5. **Given** the selected classification strategy returns no confident match, **When** results are presented, **Then** the operator receives guided recovery options to switch strategy and adjust matching inputs.
 6. **Given** content-based classification is selected, **When** pre-performance speech is transcribed and matched to the program/song list, **Then** the best match is proposed with confidence and traceable source context.
 7. **Given** required local analysis models are missing or unavailable, **When** the operator starts model-dependent processing, **Then** the system either runs with available modalities in reduced-confidence mode (with warning) or blocks execution with actionable remediation guidance when no viable modality remains.
 8. **Given** timestamp-based classification is selected and recording-time metadata is available, **When** classification runs, **Then** performances are mapped using recording-time metadata and the resulting confidence is shown for operator review.
 9. **Given** timestamp-based classification is selected and recording-time metadata is missing or invalid, **When** classification is requested, **Then** execution is blocked with guidance to correct metadata or switch strategy.
+10. **Given** timestamp-based classification is selected but event schedule metadata is unavailable, **When** classification is requested, **Then** execution is blocked with guidance to provide event schedule metadata or switch strategy.
 
 ---
 
@@ -116,13 +118,15 @@ As a non-engineering user, I can install the packaged application on a supported
 - Installation is attempted on an unsupported workstation environment.
 - Required local analysis models are missing, corrupted, or incompatible at runtime.
 - Timestamp-based classification is selected but recording-time metadata is missing or invalid.
+- Timestamp-based classification is selected but event schedule metadata is unavailable, so event-window bounds cannot be derived.
+- Application is force-closed while a job is marked active and must be recovered safely on restart.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST allow operators to create and save a job draft that links source media, metadata inputs (including program/song-list metadata), and output preferences.
-- **FR-002**: The system MUST validate required job inputs before execution and block execution until critical fields are complete.
+- **FR-001**: The system MUST allow operators to create and save a job draft that links source media, baseline metadata inputs (including program/song-list metadata), strategy-specific metadata as needed, and output preferences.
+- **FR-002**: The system MUST validate required job inputs before execution based on the selected strategy and block execution until critical fields are complete.
 - **FR-003**: The system MUST execute processing as named, observable stages with explicit stage-level status.
 - **FR-004**: The system MUST persist checkpoint state after each completed stage so interrupted jobs can resume.
 - **FR-005**: The system MUST provide an operator-driven resume action that continues from the first incomplete stage.
@@ -139,23 +143,24 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-016**: The system MUST restrict external integrations to the feature's approved-service inventory (constitution-approved services plus formally documented CR-005 exceptions) and reject all others by default.
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
-- **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata.
+- **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
 - **FR-020**: The system MUST provide a packaged runtime experience suitable for non-engineering users to install and run on supported workstation environments without manual developer setup.
 - **FR-021**: The system MUST detect configuration changes made after checkpoint creation and apply a defined configuration-to-stage dependency map to require explicit checkpoint invalidation or cancellation before resume.
 - **FR-022**: The system MUST allow operators to configure the low-confidence boundary-detection threshold per job on a 0-100 scale, with a default threshold of 70.
 - **FR-023**: The system MUST continue processing when optional hardware acceleration is unavailable by using a CPU-compatible execution path.
 - **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
 - **FR-025**: The system MUST evaluate per-output synchronization quality against an 80 ms median alignment tolerance and MUST flag outputs that exceed tolerance for manual timing correction.
-- **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator prompt to switch strategy.
+- **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator guidance to switch strategy and adjust matching inputs.
 - **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows 10/11 64-bit environments.
 - **FR-028**: The system MUST verify required local analysis models before model-dependent stages, allow reduced-confidence fallback when at least one viable modality remains, and block with remediation guidance when no viable modality remains.
 - **FR-029**: The system MUST score classification confidence on a 0-100 scale and treat a result as confident only when the top candidate score is >= 70 and at least 10 points above the next candidate.
   When only one candidate exists, the margin condition is considered satisfied.
 - **FR-030**: The system MUST migrate the UI layer from customtkinter to Flet and implement all operator-facing workflows defined in this specification.
-- **FR-031**: The system MUST prevent concurrent active-job execution on the same workstation instance and provide user-facing guidance when another job is already running.
+- **FR-031**: The system MUST enforce workstation-wide single-active-job execution (including cross-process/app-instance starts) and provide user-facing guidance when another job is already running.
 - **FR-032**: For transient publishing failures, the retry workflow MUST attempt automated recovery within a 15-minute window per output item, measured from the first transient failure event, before requiring manual intervention.
 - **FR-033**: When audio-transition and visual-cue evidence disagree in boundary detection, the system MUST present confidence-weighted modality candidates for operator confirmation.
-- **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
+- **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid and event schedule metadata MUST provide derivable event-window bounds; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
+- **FR-035**: On startup, the system MUST detect stale active-job states with no running process and transition them to resumable state before allowing new-job creation.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -177,23 +182,24 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-016** is accepted when destinations outside the approved list are rejected before external calls, unless a CR-005 exception is formally documented and added to the feature's approved-service inventory prior to runtime use.
 - **FR-017** is accepted when transient failures retry safely and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
-- **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata.
+- **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
 - **FR-020** is accepted when non-engineering users can install and launch without developer tooling steps.
 - **FR-021** is accepted when post-checkpoint config changes trigger explicit invalidate-or-cancel decisions based on a documented stage-dependency mapping.
 - **FR-022** is accepted when the boundary-confidence threshold is editable on a 0-100 scale and defaults to 70.
 - **FR-023** is accepted when jobs run to completion on environments without hardware acceleration.
 - **FR-024** is accepted when structured start/completion/failure events are present for each core step.
 - **FR-025** is accepted when outputs exceeding 80 ms median alignment tolerance are automatically flagged for manual timing correction before publish.
-- **FR-026** is accepted when zero-match classification results trigger a guided strategy-switch prompt.
+- **FR-026** is accepted when no-confident-match results trigger guided recovery options that include strategy switch and matching-input adjustment.
 - **FR-027** is accepted when installation attempts outside Windows 10/11 64-bit are blocked with clear supported-environment guidance.
 - **FR-028** is accepted when missing local models trigger reduced-confidence fallback for viable single-modality runs and trigger blocking remediation when no viable modality remains.
 - **FR-029** is accepted when classification confidence uses the defined 0-100 scoring rule and no-confident-match conditions follow the fixed-threshold-plus-margin criteria.
   Single-candidate cases are accepted when score >= 70 and the system applies the documented single-candidate margin rule.
 - **FR-030** is accepted when the Flet-based UI provides all required setup, progress, review, and publish workflows covered by User Stories 1-5.
-- **FR-031** is accepted when attempts to start a second active job on the same workstation are blocked with clear user guidance.
+- **FR-031** is accepted when attempts to start a second active job from the same workstation (including separate app instances/processes) are blocked with clear user guidance.
 - **FR-032** is accepted when each output item either recovers automatically within 15 minutes of first transient failure or is escalated with explicit manual-intervention guidance.
 - **FR-033** is accepted when evidence-disagreement cases surface confidence-weighted modality candidates and require explicit operator confirmation.
-- **FR-034** is accepted when missing/invalid recording-time metadata blocks timestamp-based classification and presents corrective or strategy-switch guidance.
+- **FR-034** is accepted when missing/invalid recording-time metadata, out-of-window timestamps, or unavailable event-window bounds (per event capture window rules) block timestamp-based classification and present corrective or strategy-switch guidance.
+- **FR-035** is accepted when restart after forced shutdown converts stale active jobs to resumable state, presents resume guidance, and blocks new-job creation until stale-state detection/transition completes.
 
 ### Constitutional Requirements *(mandatory)*
 
@@ -204,6 +210,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **CR-005 (Integration Scope)**: The feature MUST list required external services and justify any addition beyond approved project integrations.
 - **CR-006 (Quality Gates)**: Implementation validation MUST include successful `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` runs.
 - **CR-007 (Simplicity)**: The feature MUST favor the simplest design that satisfies current requirements and avoid speculative abstractions.
+- **CR-008 (Observability)**: Core processing stages MUST emit structured events for start, completion, and failure paths with stage and job context.
 
 ### Constitutional Verification Plan
 
@@ -215,10 +222,11 @@ As a non-engineering user, I can install the packaged application on a supported
   Any Google Sheets usage MUST include CR-005 justification as an extension required for linked Google Forms response retrieval.
 - **CR-006 Verification**: Delivery checklist MUST include command outputs for `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov`.
 - **CR-007 Verification**: Planning notes MUST justify why selected architecture is the minimum structure needed and identify rejected speculative abstractions.
+- **CR-008 Verification**: Test plan MUST verify structured event emission for start/completion/failure across each core processing stage.
 
 ### Key Entities *(include if feature involves data)*
 
-- **Processing Job**: A user-initiated workflow instance containing inputs, selected options, current state, and final outcomes.
+- **Processing Job**: A user-initiated workflow instance containing inputs (including event schedule metadata), selected options, current state, and final outcomes.
 - **Stage Checkpoint**: A persisted record of stage completion, resume cursor, retry count, and last error context.
 - **Media Segment Candidate**: A proposed performance interval with start/end boundaries, confidence score, and review status.
 - **Audio Source Profile**: Per-source alignment offset, level preference, noise reduction preference, and validation result.
@@ -252,6 +260,22 @@ As a non-engineering user, I can install the packaged application on a supported
 - **Operational Prerequisites**:
   - Workstation environment with sufficient storage for intermediate media outputs and retry-safe run history retention.
   - Supported installation targets are Windows 10/11 64-bit workstations.
+
+## Data and Metric Definitions
+
+- **Recording-Time Metadata Validity Rules**:
+  - Required fields: source capture timestamp and source identifier.
+  - Accepted timestamp format: ISO 8601 with timezone information.
+  - Invalid if timestamp is missing, unparsable, or outside the event capture window for the current job.
+  - FR-034 uses these rules to block timestamp-based classification when validity checks fail.
+  - **Event capture window rules**:
+    - Bounds are derived from job event schedule metadata (event start/end) normalized to the job timezone.
+    - Timestamps within the bounds, including a +/- 10 minute tolerance, are valid.
+    - If event window bounds are unavailable, timestamp-based classification is blocked and FR-034 guidance is shown.
+- **Alignment Error Measurement Rules**:
+  - Per output, alignment error is calculated as absolute offset against the designated reference audio source across sampled analysis windows.
+  - Median alignment error is the median of sampled-window offsets for that output.
+  - FR-025 and SC-008 use this metric definition for pass/fail evaluation.
 
 ## Validation Dataset Definition
 
