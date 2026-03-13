@@ -47,6 +47,7 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 6. **Given** content-based classification is selected, **When** pre-performance speech is transcribed and matched to the program/song list, **Then** the best match is proposed with confidence and traceable source context.
 7. **Given** required local analysis models are missing or unavailable, **When** the operator starts model-dependent processing, **Then** the system either runs with available modalities in reduced-confidence mode (with warning) or blocks execution with actionable remediation guidance when no viable modality remains.
 8. **Given** timestamp-based classification is selected and recording-time metadata is available, **When** classification runs, **Then** performances are mapped using recording-time metadata and the resulting confidence is shown for operator review.
+9. **Given** timestamp-based classification is selected and recording-time metadata is missing or invalid, **When** classification is requested, **Then** execution is blocked with guidance to correct metadata or switch strategy.
 
 ---
 
@@ -114,6 +115,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Confidence scores cluster near the low-confidence threshold and require predictable operator-review behavior.
 - Installation is attempted on an unsupported workstation environment.
 - Required local analysis models are missing, corrupted, or incompatible at runtime.
+- Timestamp-based classification is selected but recording-time metadata is missing or invalid.
 
 ## Requirements *(mandatory)*
 
@@ -134,7 +136,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-013**: The system MUST support processing of long recordings without full-video/frame in-memory loading and MUST keep memory-bounded behavior for audio synchronization workloads.
 - **FR-014**: The system MUST map validated metadata to each finalized output segment before publishing.
 - **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable and configurable display duration.
-- **FR-016**: The system MUST restrict external integrations to approved project services (YouTube, Google Forms, and configured AI provider services) and reject unapproved integrations by default.
+- **FR-016**: The system MUST restrict external integrations to the feature's approved-service inventory (constitution-approved services plus formally documented CR-005 exceptions) and reject all others by default.
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata.
@@ -153,6 +155,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-031**: The system MUST prevent concurrent active-job execution on the same workstation instance and provide user-facing guidance when another job is already running.
 - **FR-032**: For transient publishing failures, the retry workflow MUST attempt automated recovery within a 15-minute window per output item, measured from the first transient failure event, before requiring manual intervention.
 - **FR-033**: When audio-transition and visual-cue evidence disagree in boundary detection, the system MUST present confidence-weighted modality candidates for operator confirmation.
+- **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -190,12 +193,13 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-031** is accepted when attempts to start a second active job on the same workstation are blocked with clear user guidance.
 - **FR-032** is accepted when each output item either recovers automatically within 15 minutes of first transient failure or is escalated with explicit manual-intervention guidance.
 - **FR-033** is accepted when evidence-disagreement cases surface confidence-weighted modality candidates and require explicit operator confirmation.
+- **FR-034** is accepted when missing/invalid recording-time metadata blocks timestamp-based classification and presents corrective or strategy-switch guidance.
 
 ### Constitutional Requirements *(mandatory)*
 
 - **CR-001 (Layered Design)**: The feature MUST define boundaries between UI, application orchestration, domain logic, and infrastructure adapters.
-- **CR-002 (Stream-First Media)**: For long-media processing, the feature MUST define incremental memory-aware execution and MUST include a fallback path when optional acceleration is unavailable.
-- **CR-003 (TDD Evidence)**: The feature MUST define how failing tests are authored before implementation, how regression tests are added for discovered defects, and how manual-judgment test protocols capture approver identity, date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
+- **CR-002 (Stream-First Media)**: For long-media processing, the feature MUST define incremental memory-aware execution, MUST avoid full-file/full-frame memory retention assumptions, and MUST include a fallback path when optional acceleration is unavailable.
+- **CR-003 (TDD Evidence)**: The feature MUST define how failing tests are authored before implementation, how regression tests are added for discovered defects, and how manual-judgment test protocols capture approver identity (requesting user or designated domain reviewer, not the implementer), date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
 - **CR-004 (Resume & Retry)**: For multi-step workflows and external calls, the feature MUST define resumable checkpoints and safe retry behavior that avoids duplicate side effects.
 - **CR-005 (Integration Scope)**: The feature MUST list required external services and justify any addition beyond approved project integrations.
 - **CR-006 (Quality Gates)**: Implementation validation MUST include successful `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` runs.
@@ -204,8 +208,8 @@ As a non-engineering user, I can install the packaged application on a supported
 ### Constitutional Verification Plan
 
 - **CR-001 Verification**: Planning artifacts MUST include explicit module-boundary definitions for UI, orchestration, domain, and infrastructure.
-- **CR-002 Verification**: Test plan MUST include long-media execution on memory-constrained environments and a no-acceleration fallback run.
-- **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a manual test artifact containing approver identity, date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
+- **CR-002 Verification**: Test plan MUST include long-media execution on memory-constrained environments, explicit verification that full-file/full-frame retention is not required, and a no-acceleration fallback run.
+- **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a manual test artifact containing approver identity (requesting user or designated domain reviewer, not the implementer), date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
 - **CR-004 Verification**: Validation MUST include interrupted-run resume tests and duplicate-prevention checks across retries.
 - **CR-005 Verification**: Dependency inventory MUST include approved services and rationale for any additional integration request.
   Any Google Sheets usage MUST include CR-005 justification as an extension required for linked Google Forms response retrieval.
