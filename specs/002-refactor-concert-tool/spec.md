@@ -21,8 +21,15 @@
 - Q: 外部APIのバージョン互換ポリシーをどれで固定するか? → A: Option A（バージョン固定、互換性チェック、非互換時ブロック）。
 - Q: 適用すべきコンプライアンス/規制制約をどれで固定するか? → A: Option A（追加の規制要件なし）。
 - Q: この機能で明示的に除外するスコープをどれで固定するか? → A: Windows+macデスクトップを対象、クラウド分散実行とモバイルUIは対象外。
+- Q: 同一ジョブ下書きの同時編集競合をどう扱うか? → A: Option C（編集排他ロックで同時編集をブロック）。
+- Q: CSV/JSONメタデータのスキーマバージョン管理をどう定義するか? → A: Option A（schema_version必須、直前バージョン互換）。
+- Q: 要件衝突時のトレードオフ優先順位をどれで固定するか? → A: Option A（完全性/重複防止 > 復旧可能性 > 操作性 > 性能 > 実装コスト）。
+- Q: operator/editor/publisher の役割用語をどう正規化するか? → A: Option C（実ロールはoperator、editor/publisherは文脈ラベル）。
+- Q: macOSサポート対象バージョン範囲をどれで固定するか? → A: Option A（macOS 13以上、Apple Silicon/Intel対応）。
 
 ## User Scenarios & Testing *(mandatory)*
+
+Role terminology note: Authorization role is `operator`; `editor` and `publisher` labels in stories describe workflow context only.
 
 ### User Story 1 - Resume-Safe Core Processing (Priority: P1)
 
@@ -144,6 +151,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Manual cleanup is not performed and local storage approaches exhaustion.
 - An invalid job-state transition is requested (for example, `completed -> running`).
 - External API version drift causes incompatibility with approved integration adapters.
+- Concurrent draft-edit attempts target the same job from multiple app instances.
 
 ## Requirements *(mandatory)*
 
@@ -175,7 +183,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
 - **FR-025**: The system MUST evaluate per-output synchronization quality against an 80 ms median alignment tolerance and MUST flag outputs that exceed tolerance for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator guidance to switch strategy and adjust matching inputs.
-- **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows desktop (10/11, 64-bit) and macOS desktop environments.
+- **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows desktop (10/11, 64-bit) and macOS 13+ desktop environments (Apple Silicon and Intel).
 - **FR-028**: The system MUST verify required local analysis models before model-dependent stages, allow reduced-confidence fallback when at least one viable modality remains, and block with remediation guidance when no viable modality remains.
 - **FR-029**: The system MUST score classification confidence on a 0-100 scale and treat a result as confident only when the top candidate score is >= 70 and at least 10 points above the next candidate.
   When only one candidate exists, the margin condition is considered satisfied.
@@ -197,6 +205,9 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-045**: The system MUST pin supported API versions for each approved external service integration, perform compatibility checks before processing/publishing operations, and block execution with remediation guidance when incompatibility is detected.
 - **FR-046**: The feature MUST not introduce additional external regulatory compliance workflows beyond existing project constitutional requirements.
 - **FR-047**: The feature scope MUST target desktop application workflows on Windows/macOS only and exclude cloud-distributed execution and mobile UI workflows.
+- **FR-048**: The system MUST apply an exclusive edit lock for each job draft and block concurrent edit attempts from other app instances with user-facing lock guidance.
+- **FR-049**: The system MUST require `schema_version` in imported metadata payloads, apply explicit compatibility mapping for older versions, and support at least the immediately previous metadata schema version.
+- **FR-050**: The system MUST use a single executable authorization role (`operator`) for workflows in this feature, while allowing `editor` and `publisher` labels as scenario-context descriptors only.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -226,7 +237,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-024** is accepted when structured start/completion/failure events are present for each core step.
 - **FR-025** is accepted when outputs exceeding 80 ms median alignment tolerance are automatically flagged for manual timing correction before publish.
 - **FR-026** is accepted when no-confident-match results trigger guided recovery options that include strategy switch and matching-input adjustment.
-- **FR-027** is accepted when installation attempts outside supported Windows/macOS desktop environments are blocked with clear supported-environment guidance.
+- **FR-027** is accepted when installation attempts outside supported Windows 10/11 64-bit or macOS 13+ (Apple Silicon/Intel) environments are blocked with clear supported-environment guidance.
 - **FR-028** is accepted when missing local models trigger reduced-confidence fallback for viable single-modality runs and trigger blocking remediation when no viable modality remains.
 - **FR-029** is accepted when classification confidence uses the defined 0-100 scoring rule and no-confident-match conditions follow the fixed-threshold-plus-margin criteria.
   Single-candidate cases are accepted when score >= 70 and the system applies the documented single-candidate margin rule.
@@ -248,6 +259,9 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-045** is accepted when approved-service inventory includes pinned API versions, compatibility checks run before integration-dependent operations, and incompatible-version cases are blocked with explicit update/remediation guidance.
 - **FR-046** is accepted when delivery artifacts define no new external regulatory process gates and rely on existing constitutional controls only.
 - **FR-047** is accepted when feature tasks and validation artifacts contain no cloud-distributed execution flow and no mobile UI delivery scope.
+- **FR-048** is accepted when concurrent edit attempts on the same job draft are blocked while the lock owner is active, and blocked users receive clear lock-owner and retry guidance.
+- **FR-049** is accepted when metadata imports without `schema_version` are rejected with guidance, and imports using the immediately previous schema version are accepted through documented compatibility mapping.
+- **FR-050** is accepted when no distinct permission model is required for `editor` or `publisher` tasks and all such flows are executable under the `operator` role.
 
 ### Constitutional Requirements *(mandatory)*
 
@@ -259,6 +273,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **CR-006 (Quality Gates)**: Implementation validation MUST include successful `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` runs.
 - **CR-007 (Simplicity)**: The feature MUST favor the simplest design that satisfies current requirements and avoid speculative abstractions.
 - **CR-008 (Observability)**: Core processing stages MUST emit structured events for start, completion, and failure paths with stage and job context.
+- **CR-009 (Tradeoff Priority)**: When requirements conflict, decision priority MUST be `data integrity & deduplication` > `recoverability` > `operator usability` > `performance optimization` > `implementation cost`.
 
 ### Constitutional Verification Plan
 
@@ -271,10 +286,12 @@ As a non-engineering user, I can install the packaged application on a supported
 - **CR-006 Verification**: Delivery checklist MUST include command outputs for `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov`.
 - **CR-007 Verification**: Planning notes MUST justify why selected architecture is the minimum structure needed and identify rejected speculative abstractions.
 - **CR-008 Verification**: Test plan MUST verify structured event emission for start/completion/failure across each core processing stage.
+- **CR-009 Verification**: Design decisions that involve tradeoffs MUST reference the priority order and explain why higher-priority criteria are preserved.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Processing Job**: A user-initiated workflow instance containing inputs (including event schedule metadata), selected options, current state, and final outcomes, identified by immutable `job_id` (UUID), with lifecycle states `draft`, `ready`, `running`, `paused`, `resumable`, `failed`, `completed`, and `canceled`.
+- **Operator Role**: The single authorization role for this feature's executable workflows; `editor` and `publisher` are context labels used in scenario narratives.
 - **Stage Checkpoint**: A persisted record of stage completion, resume cursor, retry count, and last error context, uniquely identified by (`job_id`, `stage_name`, `attempt`).
 - **Media Segment Candidate**: A proposed performance interval with start/end boundaries, confidence score, and review status.
 - **Audio Source Profile**: Per-source alignment offset, level preference, noise reduction preference, and validation result.
@@ -287,13 +304,14 @@ As a non-engineering user, I can install the packaged application on a supported
 - Typical jobs include one long primary video plus one or more auxiliary audio sources.
 - Validation datasets and pilot feedback sessions are available to evaluate segmentation and synchronization quality.
 - Existing core capabilities for metadata intake and document generation remain in scope and are refactored for reliability rather than replaced by new business behavior.
-- Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit and macOS desktop environments).
+- Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit and macOS 13+ on Apple Silicon/Intel).
 - "Low-confidence" boundary review uses a default threshold of 70 on a 0-100 scale unless the operator sets another value.
 - Packaged delivery for the migrated UI targets standalone Windows desktop distribution that does not require developer toolchains on end-user machines.
 - Operators are responsible for manual cleanup of execution history and intermediate media artifacts using built-in UI deletion actions.
 - Initial release targets Japanese-speaking operators; UI text is managed as externalized resources to enable future localization.
 - No additional external legal/regulatory compliance constraints are imposed for this feature beyond baseline project constitutional controls.
 - Cloud-distributed execution and mobile UI delivery are explicitly out of scope for this feature.
+- Tradeoff decisions follow this fixed priority: data integrity/deduplication, recoverability, operator usability, performance optimization, then implementation cost.
 
 ## Dependencies
 
@@ -313,7 +331,7 @@ As a non-engineering user, I can install the packaged application on a supported
   - Media processing stack configured to ingest `MP4`/`MOV`/`MKV`/`MTS` video, `WAV`/`FLAC`/`AAC` audio, and `CSV`/`JSON` (UTF-8) metadata.
 - **Operational Prerequisites**:
   - Workstation environment with sufficient storage for intermediate media outputs and retry-safe run history retention.
-  - Supported installation targets are Windows 10/11 64-bit and macOS desktop workstations.
+  - Supported installation targets are Windows 10/11 64-bit and macOS 13+ desktop workstations (Apple Silicon/Intel).
   - External-service credentials are managed in plaintext local configuration files on the workstation.
 
 ## Data and Metric Definitions
@@ -336,6 +354,11 @@ As a non-engineering user, I can install the packaged application on a supported
   - `<10 GB` free: block new job starts.
   - `<5 GB` free: safely pause active jobs and require cleanup before resume.
   - FR-041 uses these thresholds for runtime storage-safety behavior.
+- **Metadata Schema Version Rules**:
+  - Imported CSV/JSON metadata must include `schema_version`.
+  - Current schema version and previous schema version are both accepted.
+  - Previous-version payloads must be transformed through documented compatibility mappings before validation.
+  - FR-049 uses these rules for import compatibility behavior.
 
 ## Validation Dataset Definition
 
