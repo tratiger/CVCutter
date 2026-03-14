@@ -26,6 +26,10 @@
 - Q: 要件衝突時のトレードオフ優先順位をどれで固定するか? → A: Option A（完全性/重複防止 > 復旧可能性 > 操作性 > 性能 > 実装コスト）。
 - Q: operator/editor/publisher の役割用語をどう正規化するか? → A: Option C（実ロールはoperator、editor/publisherは文脈ラベル）。
 - Q: macOSサポート対象バージョン範囲をどれで固定するか? → A: Option A（macOS 13以上、Apple Silicon/Intel対応）。
+- Q: 認証情報の平文保存リスク指摘をどう扱うか? → A: Option C（平文保存を維持し、明示警告と同意を必須化）。
+- Q: 統合先のCR-005例外（Google Sheets追加）をどう扱うか? → A: Option A（例外記述を削除し、承認済み統合のみ許可）。
+- Q: FR-013 の memory-bounded をどの閾値で定量化するか? → A: Option A（長尺検証でピークRSS 8GB以下）。
+- Q: FR-030と受け入れ基準のスコープ不一致をどう解消するか? → A: Option A（ACを全operator workflowトレーサビリティ検証へ拡張）。
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -169,10 +173,10 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-010**: The system MUST detect candidate performance boundaries using combined audio-transition and visual-cue evidence when both are available, and MUST fall back to single-modality detection with reduced-confidence labeling when one modality is unavailable.
 - **FR-011**: The system MUST provide confidence indicators for detected boundaries and require operator confirmation when confidence is below a defined threshold.
 - **FR-012**: The system MUST align multiple audio sources automatically and support switchable tuning modes: simple controls (level/noise sliders) and waveform-preview controls (visual alignment with manual offset adjustment).
-- **FR-013**: The system MUST support processing of long recordings without full-video/frame in-memory loading and MUST keep memory-bounded behavior for audio synchronization workloads.
+- **FR-013**: The system MUST support processing of long recordings without full-video/frame in-memory loading and MUST keep peak process RSS at or below `8 GB` for validation-profile synchronization workloads (up to 4 audio sources).
 - **FR-014**: The system MUST map validated metadata to each finalized output segment before publishing.
 - **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable and configurable display duration.
-- **FR-016**: The system MUST restrict external integrations to the feature's approved-service inventory (constitution-approved services plus formally documented CR-005 exceptions) and reject all others by default.
+- **FR-016**: The system MUST restrict external integrations to the feature's constitution-approved service inventory and reject all others by default.
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior, prioritize `Retry-After` when present, otherwise use exponential backoff with jitter (1s initial delay, 60s max delay), escalate to manual intervention after 15 minutes from first transient failure for that operation, and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
@@ -194,7 +198,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid and event schedule metadata MUST provide derivable event-window bounds; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
 - **FR-035**: On startup, the system MUST detect stale active-job states with no running process and transition them to resumable state before allowing new-job creation.
 - **FR-036**: For single-audio-source jobs, the system MUST auto-skip synchronization when the source is embedded video audio only, and MUST require user-guided manual synchronization when embedded video audio is unavailable and only one external source exists.
-- **FR-037**: The system MUST permit external-service credentials to be stored in plaintext local configuration files for simplified single-user workstation setup.
+- **FR-037**: The system MUST permit external-service credentials to be stored in plaintext local configuration files for simplified single-user workstation setup, and MUST require explicit user acknowledgment of the associated security risk with clear warning text before enabling this mode.
 - **FR-038**: The system MUST not auto-delete execution history or intermediate media artifacts, and MUST provide simple UI actions for operators to manually delete these records and files.
 - **FR-039**: The system MUST officially support input video containers `MP4`/`MOV`/`MKV`/`MTS`, input audio formats `WAV`/`FLAC`/`AAC`, metadata formats `CSV`/`JSON` (UTF-8), and output media in `MP4` container with `AAC` audio.
 - **FR-040**: The system MUST enforce immutable `job_id` (UUID) identity for each processing job, unique checkpoint identity by (`job_id`, `stage_name`, `attempt`), and unique publishing dedup identity by (`job_id`, `segment_id`, `destination`).
@@ -223,10 +227,10 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-010** is accepted when both evidence sources are used when available, and missing-modality runs are labeled reduced-confidence so FR-011 threshold rules determine confirmation behavior.
 - **FR-011** is accepted when below-threshold candidates require explicit operator confirmation.
 - **FR-012** is accepted when operators can switch between slider-based tuning and waveform-preview/manual-offset tuning modes.
-- **FR-013** is accepted when long recordings complete without full-video/frame in-memory loading and with bounded audio-sync memory usage.
+- **FR-013** is accepted when long recordings complete without full-video/frame in-memory loading and measured peak process RSS remains <= `8 GB` for validation-profile synchronization workloads (up to 4 audio sources).
 - **FR-014** is accepted when each finalized segment receives validated metadata before publishing.
 - **FR-015** is accepted when opening-title insertion can be toggled per output and display duration can be configured.
-- **FR-016** is accepted when destinations outside the approved list are rejected before external calls, unless a CR-005 exception is formally documented and added to the feature's approved-service inventory prior to runtime use.
+- **FR-016** is accepted when destinations outside the constitution-approved service inventory are rejected before external calls.
 - **FR-017** is accepted when transient failures (including HTTP 429 rate limiting) retry safely using `Retry-After` when available or exponential backoff with jitter otherwise, operations exceeding 15 minutes from first transient failure are escalated to manual intervention, and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
 - **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
@@ -241,14 +245,14 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-028** is accepted when missing local models trigger reduced-confidence fallback for viable single-modality runs and trigger blocking remediation when no viable modality remains.
 - **FR-029** is accepted when classification confidence uses the defined 0-100 scoring rule and no-confident-match conditions follow the fixed-threshold-plus-margin criteria.
   Single-candidate cases are accepted when score >= 70 and the system applies the documented single-candidate margin rule.
-- **FR-030** is accepted when the Flet-based UI provides all required setup, progress, review, and publish workflows covered by User Stories 1-5.
+- **FR-030** is accepted when a workflow traceability matrix demonstrates that every operator-facing workflow required by this specification is implemented in the Flet UI (including setup, progress, review, publish, lock/error guidance, and recovery flows).
 - **FR-031** is accepted when attempts to start a second active job from the same workstation (including separate app instances/processes) are blocked with clear user guidance.
 - **FR-032** is accepted when each output item either recovers automatically within 15 minutes of first transient failure or is escalated with explicit manual-intervention guidance.
 - **FR-033** is accepted when evidence-disagreement cases surface confidence-weighted modality candidates and require explicit operator confirmation.
 - **FR-034** is accepted when missing/invalid recording-time metadata, out-of-window timestamps, or unavailable event-window bounds (per event capture window rules) block timestamp-based classification and present corrective or strategy-switch guidance.
 - **FR-035** is accepted when restart after forced shutdown converts stale active jobs to resumable state, presents resume guidance, and blocks new-job creation until stale-state detection/transition completes.
 - **FR-036** is accepted when single-source embedded-video-audio jobs skip synchronization automatically, while single-source external-audio-only jobs require explicit user-guided manual synchronization.
-- **FR-037** is accepted when operator-entered external-service credentials are written to and read from a plaintext local configuration file without additional encryption or OS credential-store usage.
+- **FR-037** is accepted when operator-entered external-service credentials are written to and read from a plaintext local configuration file without additional encryption or OS credential-store usage, and enabling this mode requires explicit user acknowledgment after a clear risk warning.
 - **FR-038** is accepted when execution history and intermediate artifacts remain until operator deletion, and operators can remove selected items through direct UI actions without command-line or file-system manual steps.
 - **FR-039** is accepted when test jobs using each supported input format (`MP4`/`MOV`/`MKV`/`MTS`, `WAV`/`FLAC`/`AAC`, `CSV`/`JSON`) are ingested successfully and exported outputs are generated as `MP4` with `AAC` audio.
 - **FR-040** is accepted when duplicate checkpoint records for the same (`job_id`, `stage_name`, `attempt`) are rejected and duplicate publish attempts for the same (`job_id`, `segment_id`, `destination`) are blocked by dedup identity rules.
@@ -282,7 +286,6 @@ As a non-engineering user, I can install the packaged application on a supported
 - **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a manual test artifact containing approver identity (requesting user or designated domain reviewer, not the implementer), date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
 - **CR-004 Verification**: Validation MUST include interrupted-run resume tests and duplicate-prevention checks across retries.
 - **CR-005 Verification**: Dependency inventory MUST include approved services and rationale for any additional integration request.
-  Any Google Sheets usage MUST include CR-005 justification as an extension required for linked Google Forms response retrieval.
 - **CR-006 Verification**: Delivery checklist MUST include command outputs for `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov`.
 - **CR-007 Verification**: Planning notes MUST justify why selected architecture is the minimum structure needed and identify rejected speculative abstractions.
 - **CR-008 Verification**: Test plan MUST verify structured event emission for start/completion/failure across each core processing stage.
@@ -320,9 +323,6 @@ As a non-engineering user, I can install the packaged application on a supported
   - Google Forms service for form-response metadata intake.
   - Configured AI provider service for automated classification tasks.
   - Each approved service integration records a pinned supported API version in the feature's approved-service inventory.
-- **CR-005 Extension**:
-  - Google Sheets service for linked form-response spreadsheet retrieval is an explicitly justified extension of approved Google Forms response retrieval workflows.
-    Status: Approved for this feature as a CR-005 exception and recorded in this feature's approved-service inventory.
 - **Validation Assets**:
   - Historical concert recordings and ground-truth annotations for segmentation and sync quality checks.
 - **Local Processing Dependencies**:
@@ -332,7 +332,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **Operational Prerequisites**:
   - Workstation environment with sufficient storage for intermediate media outputs and retry-safe run history retention.
   - Supported installation targets are Windows 10/11 64-bit and macOS 13+ desktop workstations (Apple Silicon/Intel).
-  - External-service credentials are managed in plaintext local configuration files on the workstation.
+  - External-service credentials are managed in plaintext local configuration files on the workstation only after user acknowledgment of displayed security-risk warnings.
 
 ## Data and Metric Definitions
 
@@ -359,6 +359,10 @@ As a non-engineering user, I can install the packaged application on a supported
   - Current schema version and previous schema version are both accepted.
   - Previous-version payloads must be transformed through documented compatibility mappings before validation.
   - FR-049 uses these rules for import compatibility behavior.
+- **Memory Bound Measurement Rules**:
+  - Peak memory is measured as process RSS maximum during the synchronization stage.
+  - Validation profile covers long recordings with up to 4 audio sources.
+  - FR-013 and SC-002 use `peak RSS <= 8 GB` as pass/fail threshold.
 
 ## Validation Dataset Definition
 
@@ -378,7 +382,7 @@ As a non-engineering user, I can install the packaged application on a supported
 ### Measurable Outcomes
 
 - **SC-001**: At least 95% of interrupted jobs resume from the latest checkpoint and complete without recreating job state, measured over at least 50 interruption-injection runs.
-- **SC-002**: In a 20-run long-recording validation set, zero runs fail due to memory exhaustion.
+- **SC-002**: In a 20-run long-recording validation set, zero runs fail due to memory exhaustion and each run keeps synchronization-stage peak process RSS <= `8 GB`.
 - **SC-003**: At least 85% of automatically proposed performance segments (start/end boundary pair) are accepted without manual boundary edits, measured over at least 200 segment candidates.
 - **SC-004**: At least 90% of first-time operators can configure and launch a valid job within 8 minutes, measured across at least 10 participants.
 - **SC-005**: At least 98% of transient publishing failures recover automatically within 15 minutes per output item without duplicate published outputs, measured across at least 100 injected transient-failure publish attempts.
