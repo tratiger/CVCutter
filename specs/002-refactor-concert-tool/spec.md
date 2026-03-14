@@ -30,6 +30,11 @@
 - Q: 統合先のCR-005例外（Google Sheets追加）をどう扱うか? → A: Option A（例外記述を削除し、承認済み統合のみ許可）。
 - Q: FR-013 の memory-bounded をどの閾値で定量化するか? → A: Option A（長尺検証でピークRSS 8GB以下）。
 - Q: FR-030と受け入れ基準のスコープ不一致をどう解消するか? → A: Option A（ACを全operator workflowトレーサビリティ検証へ拡張）。
+- Q: stale active-job回復時の状態遷移をどう整合させるか? → A: runningからpausedを経てresumableへ遷移。
+- Q: CR-003手動検証プロトコルの実施タイミングをどう固定するか? → A: 実行前に必須項目を承認済み化し、実行後に結果を追記。
+- Q: CR-005の統合追加可否をどう統治するか? → A: 承認外統合は本featureでは不可。必要時は憲法改定を別途承認。
+- Q: FR-018監査履歴保持とFR-038手動削除の衝突をどう解消するか? → A: 監査最小履歴は削除不可、FR-038は削除対象を限定。
+- Q: 平文認証情報保存の高リスク指摘を最終的にどう扱うか? → A: 平文保存は維持し、リスクは明示受容する。
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -196,10 +201,10 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-032**: For transient publishing failures, the retry workflow MUST attempt automated recovery within a 15-minute window per output item, measured from the first transient failure event, before requiring manual intervention.
 - **FR-033**: When audio-transition and visual-cue evidence disagree in boundary detection, the system MUST present confidence-weighted modality candidates for operator confirmation.
 - **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid and event schedule metadata MUST provide derivable event-window bounds; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
-- **FR-035**: On startup, the system MUST detect stale active-job states with no running process and transition them to resumable state before allowing new-job creation.
+- **FR-035**: On startup, the system MUST detect stale active-job states with no running process and transition them through `paused` to `resumable` state before allowing new-job creation.
 - **FR-036**: For single-audio-source jobs, the system MUST auto-skip synchronization when the source is embedded video audio only, and MUST require user-guided manual synchronization when embedded video audio is unavailable and only one external source exists.
 - **FR-037**: The system MUST permit external-service credentials to be stored in plaintext local configuration files for simplified single-user workstation setup, and MUST require explicit user acknowledgment of the associated security risk with clear warning text before enabling this mode.
-- **FR-038**: The system MUST not auto-delete execution history or intermediate media artifacts, and MUST provide simple UI actions for operators to manually delete these records and files.
+- **FR-038**: The system MUST not auto-delete execution history or intermediate media artifacts, and MUST provide simple UI actions for operators to manually delete non-audit records and files.
 - **FR-039**: The system MUST officially support input video containers `MP4`/`MOV`/`MKV`/`MTS`, input audio formats `WAV`/`FLAC`/`AAC`, metadata formats `CSV`/`JSON` (UTF-8), and output media in `MP4` container with `AAC` audio.
 - **FR-040**: The system MUST enforce immutable `job_id` (UUID) identity for each processing job, unique checkpoint identity by (`job_id`, `stage_name`, `attempt`), and unique publishing dedup identity by (`job_id`, `segment_id`, `destination`).
 - **FR-041**: The system MUST monitor local free storage and apply thresholds: warning below `20 GB`, block new job starts below `10 GB`, and safely pause active jobs below `5 GB` while showing operator cleanup guidance.
@@ -212,6 +217,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-048**: The system MUST apply an exclusive edit lock for each job draft and block concurrent edit attempts from other app instances with user-facing lock guidance.
 - **FR-049**: The system MUST require `schema_version` in imported metadata payloads, apply explicit compatibility mapping for older versions, and support at least the immediately previous metadata schema version.
 - **FR-050**: The system MUST use a single executable authorization role (`operator`) for workflows in this feature, while allowing `editor` and `publisher` labels as scenario-context descriptors only.
+- **FR-051**: The system MUST retain a non-deletable minimal audit ledger containing job identifier, job creation event, stage transitions, retry outcomes, terminal completion outcome, and timestamps.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -250,10 +256,10 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-032** is accepted when each output item either recovers automatically within 15 minutes of first transient failure or is escalated with explicit manual-intervention guidance.
 - **FR-033** is accepted when evidence-disagreement cases surface confidence-weighted modality candidates and require explicit operator confirmation.
 - **FR-034** is accepted when missing/invalid recording-time metadata, out-of-window timestamps, or unavailable event-window bounds (per event capture window rules) block timestamp-based classification and present corrective or strategy-switch guidance.
-- **FR-035** is accepted when restart after forced shutdown converts stale active jobs to resumable state, presents resume guidance, and blocks new-job creation until stale-state detection/transition completes.
+- **FR-035** is accepted when restart after forced shutdown transitions stale active jobs through `paused` to `resumable`, presents resume guidance, and blocks new-job creation until stale-state detection/transition completes.
 - **FR-036** is accepted when single-source embedded-video-audio jobs skip synchronization automatically, while single-source external-audio-only jobs require explicit user-guided manual synchronization.
 - **FR-037** is accepted when operator-entered external-service credentials are written to and read from a plaintext local configuration file without additional encryption or OS credential-store usage, and enabling this mode requires explicit user acknowledgment after a clear risk warning.
-- **FR-038** is accepted when execution history and intermediate artifacts remain until operator deletion, and operators can remove selected items through direct UI actions without command-line or file-system manual steps.
+- **FR-038** is accepted when non-audit records and intermediate artifacts remain until operator deletion, operators can remove selected items through direct UI actions without command-line or file-system manual steps, and deletion attempts against the minimal audit ledger are blocked.
 - **FR-039** is accepted when test jobs using each supported input format (`MP4`/`MOV`/`MKV`/`MTS`, `WAV`/`FLAC`/`AAC`, `CSV`/`JSON`) are ingested successfully and exported outputs are generated as `MP4` with `AAC` audio.
 - **FR-040** is accepted when duplicate checkpoint records for the same (`job_id`, `stage_name`, `attempt`) are rejected and duplicate publish attempts for the same (`job_id`, `segment_id`, `destination`) are blocked by dedup identity rules.
 - **FR-041** is accepted when capacity monitoring triggers warning (`<20 GB`), start blocking (`<10 GB`), and safe pause (`<5 GB`) behavior with explicit cleanup guidance and resumable-state preservation.
@@ -266,14 +272,15 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-048** is accepted when concurrent edit attempts on the same job draft are blocked while the lock owner is active, and blocked users receive clear lock-owner and retry guidance.
 - **FR-049** is accepted when metadata imports without `schema_version` are rejected with guidance, and imports using the immediately previous schema version are accepted through documented compatibility mapping.
 - **FR-050** is accepted when no distinct permission model is required for `editor` or `publisher` tasks and all such flows are executable under the `operator` role.
+- **FR-051** is accepted when canonical audit entries (job identifier, job creation, stage transitions, retry outcomes, terminal completion outcome, timestamps) are preserved and cannot be removed through operator cleanup actions.
 
 ### Constitutional Requirements *(mandatory)*
 
 - **CR-001 (Layered Design)**: The feature MUST define boundaries between UI, application orchestration, domain logic, and infrastructure adapters.
 - **CR-002 (Stream-First Media)**: For long-media processing, the feature MUST define incremental memory-aware execution, MUST avoid full-file/full-frame memory retention assumptions, and MUST include a fallback path when optional acceleration is unavailable.
-- **CR-003 (TDD Evidence)**: The feature MUST define how failing tests are authored before implementation, how regression tests are added for discovered defects, and how manual-judgment test protocols capture approver identity (requesting user or designated domain reviewer, not the implementer), date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
+- **CR-003 (TDD Evidence)**: The feature MUST define how failing tests are authored before implementation, how regression tests are added for discovered defects, and how manual-judgment test protocols capture approver identity (requesting user or designated domain reviewer, not the implementer), date, procedures, materials, and acceptance criteria before execution, then append post-execution pass/fail outcomes after execution.
 - **CR-004 (Resume & Retry)**: For multi-step workflows and external calls, the feature MUST define resumable checkpoints and safe retry behavior that avoids duplicate side effects.
-- **CR-005 (Integration Scope)**: The feature MUST list required external services and justify any addition beyond approved project integrations.
+- **CR-005 (Integration Scope)**: The feature MUST list required external services within approved project integrations and MUST reject non-approved integrations in this feature unless a separate constitution amendment is approved.
 - **CR-006 (Quality Gates)**: Implementation validation MUST include successful `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` runs.
 - **CR-007 (Simplicity)**: The feature MUST favor the simplest design that satisfies current requirements and avoid speculative abstractions.
 - **CR-008 (Observability)**: Core processing stages MUST emit structured events for start, completion, and failure paths with stage and job context.
@@ -283,9 +290,9 @@ As a non-engineering user, I can install the packaged application on a supported
 
 - **CR-001 Verification**: Planning artifacts MUST include explicit module-boundary definitions for UI, orchestration, domain, and infrastructure.
 - **CR-002 Verification**: Test plan MUST include long-media execution on memory-constrained environments, explicit verification that full-file/full-frame retention is not required, and a no-acceleration fallback run.
-- **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a manual test artifact containing approver identity (requesting user or designated domain reviewer, not the implementer), date, procedures, materials, acceptance criteria, and post-execution pass/fail outcomes.
+- **CR-003 Verification**: Test plan MUST include Red-Green-Refactor evidence plus a manual test artifact that records approver identity (requesting user or designated domain reviewer, not the implementer), date, procedures, materials, and acceptance criteria before execution, then records post-execution pass/fail outcomes after execution.
 - **CR-004 Verification**: Validation MUST include interrupted-run resume tests and duplicate-prevention checks across retries.
-- **CR-005 Verification**: Dependency inventory MUST include approved services and rationale for any additional integration request.
+- **CR-005 Verification**: Dependency inventory MUST include only approved services for this feature; any additional integration proposal MUST be documented as a separate constitution-amendment request and not treated as in-scope until approved.
 - **CR-006 Verification**: Delivery checklist MUST include command outputs for `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov`.
 - **CR-007 Verification**: Planning notes MUST justify why selected architecture is the minimum structure needed and identify rejected speculative abstractions.
 - **CR-008 Verification**: Test plan MUST verify structured event emission for start/completion/failure across each core processing stage.
@@ -310,11 +317,12 @@ As a non-engineering user, I can install the packaged application on a supported
 - Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit and macOS 13+ on Apple Silicon/Intel).
 - "Low-confidence" boundary review uses a default threshold of 70 on a 0-100 scale unless the operator sets another value.
 - Packaged delivery for the migrated UI targets standalone desktop distribution for supported Windows and macOS environments without requiring developer toolchains on end-user machines.
-- Operators are responsible for manual cleanup of execution history and intermediate media artifacts using built-in UI deletion actions.
+- Operators are responsible for manual cleanup of non-audit execution records and intermediate media artifacts using built-in UI deletion actions.
 - Initial release targets Japanese-speaking operators; UI text is managed as externalized resources to enable future localization.
 - No additional external legal/regulatory compliance constraints are imposed for this feature beyond baseline project constitutional controls.
 - Cloud-distributed execution and mobile UI delivery are explicitly out of scope for this feature.
 - Tradeoff decisions follow this fixed priority: data integrity/deduplication, recoverability, operator usability, performance optimization, then implementation cost.
+- Plaintext credential-at-rest risk (FR-037 mode) is an explicitly accepted operational risk for this feature.
 
 ## Dependencies
 
