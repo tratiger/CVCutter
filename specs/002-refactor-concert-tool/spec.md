@@ -15,7 +15,7 @@
 - Q: 対応する入力/出力フォーマットの範囲をどこまで固定するか? → A: Option Aに加えてMTSをサポート。
 - Q: Processing Job / Stage Checkpoint / Publishing Task の一意性ルールをどれで固定するか? → A: Option A（UUID job_id、不変キー、dedupキー一意）。
 - Q: ローカルストレージ容量が不足した場合の動作をどれで固定するか? → A: Option A（<20GB警告、<10GB開始ブロック、<5GB安全一時停止）。
-- Q: Processing Job の状態遷移をどこまで固定するか? → A: Option A（draft→ready→running→paused→resumable→終端状態）。
+- Q: Processing Job の状態遷移をどこまで固定するか? → A: Option A（通常はrunningから終端へ直接遷移、paused/resumableは中断復旧系で使用）。
 - Q: 初期リリースで保証するUI言語対応をどこまで固定するか? → A: Option A（初期は日本語UI正式サポート、文言外部化）。
 - Q: 初期リリースで満たすアクセシビリティ基準をどこまで固定するか? → A: Option A（キーボード操作完全対応、フォーカス可視化、WCAG 2.1 AA相当）。
 - Q: 外部APIのバージョン互換ポリシーをどれで固定するか? → A: Option A（バージョン固定、互換性チェック、非互換時ブロック）。
@@ -173,7 +173,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-014**: The system MUST map validated metadata to each finalized output segment before publishing.
 - **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable and configurable display duration.
 - **FR-016**: The system MUST restrict external integrations to the feature's approved-service inventory (constitution-approved services plus formally documented CR-005 exceptions) and reject all others by default.
-- **FR-017**: The system MUST retry transient external-service failures with safe retry behavior, prioritize `Retry-After` when present, otherwise use exponential backoff with jitter (1s initial delay, 60s max delay), and record retry outcomes.
+- **FR-017**: The system MUST retry transient external-service failures with safe retry behavior, prioritize `Retry-After` when present, otherwise use exponential backoff with jitter (1s initial delay, 60s max delay), escalate to manual intervention after 15 minutes from first transient failure for that operation, and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
 - **FR-020**: The system MUST provide a packaged runtime experience suitable for non-engineering users to install and run on supported workstation environments without manual developer setup.
@@ -199,7 +199,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-039**: The system MUST officially support input video containers `MP4`/`MOV`/`MKV`/`MTS`, input audio formats `WAV`/`FLAC`/`AAC`, metadata formats `CSV`/`JSON` (UTF-8), and output media in `MP4` container with `AAC` audio.
 - **FR-040**: The system MUST enforce immutable `job_id` (UUID) identity for each processing job, unique checkpoint identity by (`job_id`, `stage_name`, `attempt`), and unique publishing dedup identity by (`job_id`, `segment_id`, `destination`).
 - **FR-041**: The system MUST monitor local free storage and apply thresholds: warning below `20 GB`, block new job starts below `10 GB`, and safely pause active jobs below `5 GB` while showing operator cleanup guidance.
-- **FR-042**: The system MUST enforce processing-job lifecycle transitions as `draft -> ready -> running -> paused -> resumable -> (running|failed|completed|canceled)` and reject invalid transitions with actionable operator guidance.
+- **FR-042**: The system MUST enforce processing-job lifecycle transitions where normal execution allows `running -> completed|failed|canceled`, while interruption recovery uses `running -> paused -> resumable -> running`, and MUST reject invalid transitions with actionable operator guidance.
 - **FR-043**: The system MUST provide Japanese-language UI coverage for all operator-facing workflows in this specification, and MUST externalize UI strings to support future multilingual extension.
 - **FR-044**: The system MUST support keyboard-only execution of all primary operator workflows, provide visible focus indication on interactive controls, and meet WCAG 2.1 AA-equivalent contrast requirements on primary screens.
 - **FR-045**: The system MUST pin supported API versions for each approved external service integration, perform compatibility checks before processing/publishing operations, and block execution with remediation guidance when incompatibility is detected.
@@ -227,7 +227,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-014** is accepted when each finalized segment receives validated metadata before publishing.
 - **FR-015** is accepted when opening-title insertion can be toggled per output and display duration can be configured.
 - **FR-016** is accepted when destinations outside the approved list are rejected before external calls, unless a CR-005 exception is formally documented and added to the feature's approved-service inventory prior to runtime use.
-- **FR-017** is accepted when transient failures (including HTTP 429 rate limiting) retry safely using `Retry-After` when available or exponential backoff with jitter otherwise, and retry outcomes are recorded.
+- **FR-017** is accepted when transient failures (including HTTP 429 rate limiting) retry safely using `Retry-After` when available or exponential backoff with jitter otherwise, operations exceeding 15 minutes from first transient failure are escalated to manual intervention, and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
 - **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
 - **FR-020** is accepted when non-engineering users can install and launch without developer tooling steps.
@@ -253,7 +253,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-039** is accepted when test jobs using each supported input format (`MP4`/`MOV`/`MKV`/`MTS`, `WAV`/`FLAC`/`AAC`, `CSV`/`JSON`) are ingested successfully and exported outputs are generated as `MP4` with `AAC` audio.
 - **FR-040** is accepted when duplicate checkpoint records for the same (`job_id`, `stage_name`, `attempt`) are rejected and duplicate publish attempts for the same (`job_id`, `segment_id`, `destination`) are blocked by dedup identity rules.
 - **FR-041** is accepted when capacity monitoring triggers warning (`<20 GB`), start blocking (`<10 GB`), and safe pause (`<5 GB`) behavior with explicit cleanup guidance and resumable-state preservation.
-- **FR-042** is accepted when valid transitions succeed, invalid transitions are blocked, and blocked attempts include guidance for the nearest valid next state.
+- **FR-042** is accepted when valid direct terminal transitions from `running` succeed, recovery transitions through `paused/resumable` succeed for interrupted runs, invalid transitions are blocked, and blocked attempts include guidance for the nearest valid next state.
 - **FR-043** is accepted when all setup/progress/review/publish flows are fully usable in Japanese UI text and string resources are not hard-coded in workflow logic.
 - **FR-044** is accepted when primary setup/progress/review/publish workflows are fully operable by keyboard only, focus is visibly trackable on each actionable UI component, and contrast checks pass for defined primary screens.
 - **FR-045** is accepted when approved-service inventory includes pinned API versions, compatibility checks run before integration-dependent operations, and incompatible-version cases are blocked with explicit update/remediation guidance.
@@ -306,7 +306,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Existing core capabilities for metadata intake and document generation remain in scope and are refactored for reliability rather than replaced by new business behavior.
 - Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit and macOS 13+ on Apple Silicon/Intel).
 - "Low-confidence" boundary review uses a default threshold of 70 on a 0-100 scale unless the operator sets another value.
-- Packaged delivery for the migrated UI targets standalone Windows desktop distribution that does not require developer toolchains on end-user machines.
+- Packaged delivery for the migrated UI targets standalone desktop distribution for supported Windows and macOS environments without requiring developer toolchains on end-user machines.
 - Operators are responsible for manual cleanup of execution history and intermediate media artifacts using built-in UI deletion actions.
 - Initial release targets Japanese-speaking operators; UI text is managed as externalized resources to enable future localization.
 - No additional external legal/regulatory compliance constraints are imposed for this feature beyond baseline project constitutional controls.
