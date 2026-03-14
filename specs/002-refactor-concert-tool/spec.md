@@ -5,6 +5,23 @@
 **Status**: Ready for Planning  
 **Input**: User description: "`@refact-plan.md specify` (large-scale refactor plan for concert video splitting, audio synchronization, and automated publishing workflow)"
 
+## Clarifications
+
+### Session 2026-03-14
+
+- Q: 外部連携認証情報の保存方式は? → A: Option D（簡便性優先で平文設定ファイル保存を許可）
+- Q: 外部APIでレート制限（429等）が発生した場合、再試行ポリシーをどれに固定するか? → A: Option A（Retry-After優先、指数バックオフ+ジッター、15分超で手動介入）
+- Q: 実行履歴と中間生成物の保持期間をどう定義するか? → A: 手動削除運用。ただし、UI上で簡単に消せるようにする。
+- Q: 対応する入力/出力フォーマットの範囲をどこまで固定するか? → A: Option Aに加えてMTSをサポート。
+- Q: Processing Job / Stage Checkpoint / Publishing Task の一意性ルールをどれで固定するか? → A: Option A（UUID job_id、不変キー、dedupキー一意）。
+- Q: ローカルストレージ容量が不足した場合の動作をどれで固定するか? → A: Option A（<20GB警告、<10GB開始ブロック、<5GB安全一時停止）。
+- Q: Processing Job の状態遷移をどこまで固定するか? → A: Option A（draft→ready→running→paused→resumable→終端状態）。
+- Q: 初期リリースで保証するUI言語対応をどこまで固定するか? → A: Option A（初期は日本語UI正式サポート、文言外部化）。
+- Q: 初期リリースで満たすアクセシビリティ基準をどこまで固定するか? → A: Option A（キーボード操作完全対応、フォーカス可視化、WCAG 2.1 AA相当）。
+- Q: 外部APIのバージョン互換ポリシーをどれで固定するか? → A: Option A（バージョン固定、互換性チェック、非互換時ブロック）。
+- Q: 適用すべきコンプライアンス/規制制約をどれで固定するか? → A: Option A（追加の規制要件なし）。
+- Q: この機能で明示的に除外するスコープをどれで固定するか? → A: Windows+macデスクトップを対象、クラウド分散実行とモバイルUIは対象外。
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Resume-Safe Core Processing (Priority: P1)
@@ -115,6 +132,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Metadata from forms is partially missing, duplicated, or conflicts with detected performance candidates.
 - An interruption occurs during output writing after upstream processing already finished.
 - External publishing service accepts the file but delays final completion status callbacks.
+- External service calls repeatedly return rate-limit responses (HTTP 429), with and without `Retry-After` headers.
 - Operator switches processing profiles mid-job and attempts to resume from an older checkpoint.
 - Confidence scores cluster near the low-confidence threshold and require predictable operator-review behavior.
 - Installation is attempted on an unsupported workstation environment.
@@ -123,6 +141,9 @@ As a non-engineering user, I can install the packaged application on a supported
 - Timestamp-based classification is selected but event schedule metadata is unavailable, so event-window bounds cannot be derived.
 - Application is force-closed while a job is marked active and must be recovered safely on restart.
 - Single-source audio jobs where embedded video audio is absent and only one external source is available.
+- Manual cleanup is not performed and local storage approaches exhaustion.
+- An invalid job-state transition is requested (for example, `completed -> running`).
+- External API version drift causes incompatibility with approved integration adapters.
 
 ## Requirements *(mandatory)*
 
@@ -144,7 +165,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-014**: The system MUST map validated metadata to each finalized output segment before publishing.
 - **FR-015**: The system MUST support optional opening-title insertion per output with operator-controlled enable/disable and configurable display duration.
 - **FR-016**: The system MUST restrict external integrations to the feature's approved-service inventory (constitution-approved services plus formally documented CR-005 exceptions) and reject all others by default.
-- **FR-017**: The system MUST retry transient external-service failures with safe retry behavior and record retry outcomes.
+- **FR-017**: The system MUST retry transient external-service failures with safe retry behavior, prioritize `Retry-After` when present, otherwise use exponential backoff with jitter (1s initial delay, 60s max delay), and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
 - **FR-020**: The system MUST provide a packaged runtime experience suitable for non-engineering users to install and run on supported workstation environments without manual developer setup.
@@ -154,7 +175,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
 - **FR-025**: The system MUST evaluate per-output synchronization quality against an 80 ms median alignment tolerance and MUST flag outputs that exceed tolerance for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator guidance to switch strategy and adjust matching inputs.
-- **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows 10/11 64-bit environments.
+- **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows desktop (10/11, 64-bit) and macOS desktop environments.
 - **FR-028**: The system MUST verify required local analysis models before model-dependent stages, allow reduced-confidence fallback when at least one viable modality remains, and block with remediation guidance when no viable modality remains.
 - **FR-029**: The system MUST score classification confidence on a 0-100 scale and treat a result as confident only when the top candidate score is >= 70 and at least 10 points above the next candidate.
   When only one candidate exists, the margin condition is considered satisfied.
@@ -165,6 +186,17 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid and event schedule metadata MUST provide derivable event-window bounds; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
 - **FR-035**: On startup, the system MUST detect stale active-job states with no running process and transition them to resumable state before allowing new-job creation.
 - **FR-036**: For single-audio-source jobs, the system MUST auto-skip synchronization when the source is embedded video audio only, and MUST require user-guided manual synchronization when embedded video audio is unavailable and only one external source exists.
+- **FR-037**: The system MUST permit external-service credentials to be stored in plaintext local configuration files for simplified single-user workstation setup.
+- **FR-038**: The system MUST not auto-delete execution history or intermediate media artifacts, and MUST provide simple UI actions for operators to manually delete these records and files.
+- **FR-039**: The system MUST officially support input video containers `MP4`/`MOV`/`MKV`/`MTS`, input audio formats `WAV`/`FLAC`/`AAC`, metadata formats `CSV`/`JSON` (UTF-8), and output media in `MP4` container with `AAC` audio.
+- **FR-040**: The system MUST enforce immutable `job_id` (UUID) identity for each processing job, unique checkpoint identity by (`job_id`, `stage_name`, `attempt`), and unique publishing dedup identity by (`job_id`, `segment_id`, `destination`).
+- **FR-041**: The system MUST monitor local free storage and apply thresholds: warning below `20 GB`, block new job starts below `10 GB`, and safely pause active jobs below `5 GB` while showing operator cleanup guidance.
+- **FR-042**: The system MUST enforce processing-job lifecycle transitions as `draft -> ready -> running -> paused -> resumable -> (running|failed|completed|canceled)` and reject invalid transitions with actionable operator guidance.
+- **FR-043**: The system MUST provide Japanese-language UI coverage for all operator-facing workflows in this specification, and MUST externalize UI strings to support future multilingual extension.
+- **FR-044**: The system MUST support keyboard-only execution of all primary operator workflows, provide visible focus indication on interactive controls, and meet WCAG 2.1 AA-equivalent contrast requirements on primary screens.
+- **FR-045**: The system MUST pin supported API versions for each approved external service integration, perform compatibility checks before processing/publishing operations, and block execution with remediation guidance when incompatibility is detected.
+- **FR-046**: The feature MUST not introduce additional external regulatory compliance workflows beyond existing project constitutional requirements.
+- **FR-047**: The feature scope MUST target desktop application workflows on Windows/macOS only and exclude cloud-distributed execution and mobile UI workflows.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -184,7 +216,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-014** is accepted when each finalized segment receives validated metadata before publishing.
 - **FR-015** is accepted when opening-title insertion can be toggled per output and display duration can be configured.
 - **FR-016** is accepted when destinations outside the approved list are rejected before external calls, unless a CR-005 exception is formally documented and added to the feature's approved-service inventory prior to runtime use.
-- **FR-017** is accepted when transient failures retry safely and retry outcomes are recorded.
+- **FR-017** is accepted when transient failures (including HTTP 429 rate limiting) retry safely using `Retry-After` when available or exponential backoff with jitter otherwise, and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
 - **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
 - **FR-020** is accepted when non-engineering users can install and launch without developer tooling steps.
@@ -194,7 +226,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-024** is accepted when structured start/completion/failure events are present for each core step.
 - **FR-025** is accepted when outputs exceeding 80 ms median alignment tolerance are automatically flagged for manual timing correction before publish.
 - **FR-026** is accepted when no-confident-match results trigger guided recovery options that include strategy switch and matching-input adjustment.
-- **FR-027** is accepted when installation attempts outside Windows 10/11 64-bit are blocked with clear supported-environment guidance.
+- **FR-027** is accepted when installation attempts outside supported Windows/macOS desktop environments are blocked with clear supported-environment guidance.
 - **FR-028** is accepted when missing local models trigger reduced-confidence fallback for viable single-modality runs and trigger blocking remediation when no viable modality remains.
 - **FR-029** is accepted when classification confidence uses the defined 0-100 scoring rule and no-confident-match conditions follow the fixed-threshold-plus-margin criteria.
   Single-candidate cases are accepted when score >= 70 and the system applies the documented single-candidate margin rule.
@@ -205,6 +237,17 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-034** is accepted when missing/invalid recording-time metadata, out-of-window timestamps, or unavailable event-window bounds (per event capture window rules) block timestamp-based classification and present corrective or strategy-switch guidance.
 - **FR-035** is accepted when restart after forced shutdown converts stale active jobs to resumable state, presents resume guidance, and blocks new-job creation until stale-state detection/transition completes.
 - **FR-036** is accepted when single-source embedded-video-audio jobs skip synchronization automatically, while single-source external-audio-only jobs require explicit user-guided manual synchronization.
+- **FR-037** is accepted when operator-entered external-service credentials are written to and read from a plaintext local configuration file without additional encryption or OS credential-store usage.
+- **FR-038** is accepted when execution history and intermediate artifacts remain until operator deletion, and operators can remove selected items through direct UI actions without command-line or file-system manual steps.
+- **FR-039** is accepted when test jobs using each supported input format (`MP4`/`MOV`/`MKV`/`MTS`, `WAV`/`FLAC`/`AAC`, `CSV`/`JSON`) are ingested successfully and exported outputs are generated as `MP4` with `AAC` audio.
+- **FR-040** is accepted when duplicate checkpoint records for the same (`job_id`, `stage_name`, `attempt`) are rejected and duplicate publish attempts for the same (`job_id`, `segment_id`, `destination`) are blocked by dedup identity rules.
+- **FR-041** is accepted when capacity monitoring triggers warning (`<20 GB`), start blocking (`<10 GB`), and safe pause (`<5 GB`) behavior with explicit cleanup guidance and resumable-state preservation.
+- **FR-042** is accepted when valid transitions succeed, invalid transitions are blocked, and blocked attempts include guidance for the nearest valid next state.
+- **FR-043** is accepted when all setup/progress/review/publish flows are fully usable in Japanese UI text and string resources are not hard-coded in workflow logic.
+- **FR-044** is accepted when primary setup/progress/review/publish workflows are fully operable by keyboard only, focus is visibly trackable on each actionable UI component, and contrast checks pass for defined primary screens.
+- **FR-045** is accepted when approved-service inventory includes pinned API versions, compatibility checks run before integration-dependent operations, and incompatible-version cases are blocked with explicit update/remediation guidance.
+- **FR-046** is accepted when delivery artifacts define no new external regulatory process gates and rely on existing constitutional controls only.
+- **FR-047** is accepted when feature tasks and validation artifacts contain no cloud-distributed execution flow and no mobile UI delivery scope.
 
 ### Constitutional Requirements *(mandatory)*
 
@@ -231,12 +274,12 @@ As a non-engineering user, I can install the packaged application on a supported
 
 ### Key Entities *(include if feature involves data)*
 
-- **Processing Job**: A user-initiated workflow instance containing inputs (including event schedule metadata), selected options, current state, and final outcomes.
-- **Stage Checkpoint**: A persisted record of stage completion, resume cursor, retry count, and last error context.
+- **Processing Job**: A user-initiated workflow instance containing inputs (including event schedule metadata), selected options, current state, and final outcomes, identified by immutable `job_id` (UUID), with lifecycle states `draft`, `ready`, `running`, `paused`, `resumable`, `failed`, `completed`, and `canceled`.
+- **Stage Checkpoint**: A persisted record of stage completion, resume cursor, retry count, and last error context, uniquely identified by (`job_id`, `stage_name`, `attempt`).
 - **Media Segment Candidate**: A proposed performance interval with start/end boundaries, confidence score, and review status.
 - **Audio Source Profile**: Per-source alignment offset, level preference, noise reduction preference, and validation result.
 - **Metadata Mapping Record**: The association between finalized segments and human-readable metadata used for export/publishing.
-- **Publishing Task**: A tracked outbound delivery action with destination, status lifecycle, retry history, and deduplication token.
+- **Publishing Task**: A tracked outbound delivery action with destination, status lifecycle, retry history, and deduplication token, uniquely keyed by (`job_id`, `segment_id`, `destination`).
 
 ## Assumptions
 
@@ -244,9 +287,13 @@ As a non-engineering user, I can install the packaged application on a supported
 - Typical jobs include one long primary video plus one or more auxiliary audio sources.
 - Validation datasets and pilot feedback sessions are available to evaluate segmentation and synchronization quality.
 - Existing core capabilities for metadata intake and document generation remain in scope and are refactored for reliability rather than replaced by new business behavior.
-- Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit).
+- Installable distribution is required for non-engineering users on supported workstation environments (Windows 10/11 64-bit and macOS desktop environments).
 - "Low-confidence" boundary review uses a default threshold of 70 on a 0-100 scale unless the operator sets another value.
 - Packaged delivery for the migrated UI targets standalone Windows desktop distribution that does not require developer toolchains on end-user machines.
+- Operators are responsible for manual cleanup of execution history and intermediate media artifacts using built-in UI deletion actions.
+- Initial release targets Japanese-speaking operators; UI text is managed as externalized resources to enable future localization.
+- No additional external legal/regulatory compliance constraints are imposed for this feature beyond baseline project constitutional controls.
+- Cloud-distributed execution and mobile UI delivery are explicitly out of scope for this feature.
 
 ## Dependencies
 
@@ -254,6 +301,7 @@ As a non-engineering user, I can install the packaged application on a supported
   - YouTube service for publish destination operations.
   - Google Forms service for form-response metadata intake.
   - Configured AI provider service for automated classification tasks.
+  - Each approved service integration records a pinned supported API version in the feature's approved-service inventory.
 - **CR-005 Extension**:
   - Google Sheets service for linked form-response spreadsheet retrieval is an explicitly justified extension of approved Google Forms response retrieval workflows.
     Status: Approved for this feature as a CR-005 exception and recorded in this feature's approved-service inventory.
@@ -262,9 +310,11 @@ As a non-engineering user, I can install the packaged application on a supported
 - **Local Processing Dependencies**:
   - Local speech-transcription model assets for pre-performance content-based classification.
   - Local visual-cue model assets for performance-boundary detection.
+  - Media processing stack configured to ingest `MP4`/`MOV`/`MKV`/`MTS` video, `WAV`/`FLAC`/`AAC` audio, and `CSV`/`JSON` (UTF-8) metadata.
 - **Operational Prerequisites**:
   - Workstation environment with sufficient storage for intermediate media outputs and retry-safe run history retention.
-  - Supported installation targets are Windows 10/11 64-bit workstations.
+  - Supported installation targets are Windows 10/11 64-bit and macOS desktop workstations.
+  - External-service credentials are managed in plaintext local configuration files on the workstation.
 
 ## Data and Metric Definitions
 
@@ -281,6 +331,11 @@ As a non-engineering user, I can install the packaged application on a supported
   - Per output, alignment error is calculated as absolute offset against the designated reference audio source across sampled analysis windows.
   - Median alignment error is the median of sampled-window offsets for that output.
   - FR-025 and SC-008 use this metric definition for pass/fail evaluation.
+- **Storage Capacity Threshold Rules**:
+  - `<20 GB` free: warning state.
+  - `<10 GB` free: block new job starts.
+  - `<5 GB` free: safely pause active jobs and require cleanup before resume.
+  - FR-041 uses these thresholds for runtime storage-safety behavior.
 
 ## Validation Dataset Definition
 
@@ -308,3 +363,4 @@ As a non-engineering user, I can install the packaged application on a supported
 - **SC-007**: At least 90% of first-time non-engineering users can install and open the packaged application in under 10 minutes, measured across at least 10 participants.
 - **SC-008**: In the 20-run synchronization validation set, at least 90% of outputs achieve median alignment error <= 80 ms without manual correction, and all remaining outputs are clearly flagged for manual timing correction.
 - **SC-009**: At least 90% of automated content-based classification proposals are accepted without manual title correction, measured over at least 200 classification attempts in the validation dataset.
+- **SC-010**: In accessibility validation across at least 5 representative operators, 100% of primary workflows complete via keyboard-only operation and all designated primary screens pass WCAG 2.1 AA-equivalent contrast checks.
