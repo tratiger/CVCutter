@@ -35,6 +35,6 @@
 - Validation iteration 2 resolved structural gaps by adding missing user scenarios, dependency inventory, constitutional verification plan, and FR acceptance coverage.
 - Validation iteration 3 aligned constitution-required quality gates, manual-test protocol evidence fields, additional traceability requirement (FR-018), and measurable sampling details in success criteria.
 - No unresolved placeholders or `[NEEDS CLARIFICATION]` markers were found.
-- Spec evidence includes independently testable user stories (P1-P5), functional requirements (FR-001 to FR-035), explicit assumptions/dependencies, and measurable success criteria (SC-001 to SC-009).
+- Spec evidence includes independently testable user stories (P1-P5), functional requirements (FR-001 to FR-036), explicit assumptions/dependencies, and measurable success criteria (SC-001 to SC-009).
 - Checklist waivers are explicitly marked inline where constitution-mandated governance/tooling detail must remain in the specification.
 - Runtime outcome proof is deferred to implementation validation, while planning readiness is satisfied by measurable criterion definitions.

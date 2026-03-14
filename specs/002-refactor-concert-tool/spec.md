@@ -26,7 +26,7 @@ As an operator, I can run the core processing workflow (ingest, segmentation, au
 7. **Given** any core processing stage begins or ends, **When** diagnostics are reviewed, **Then** structured start/completion/failure events are present for that stage.
 8. **Given** a long recording on a memory-constrained workstation, **When** processing runs end-to-end, **Then** the job completes without memory exhaustion failure.
 9. **Given** one job is already active on the workstation, **When** the operator attempts to start a second job, **Then** the system blocks the new start request and shows single-active-job guidance.
-10. **Given** the application was force-closed while a job was active, **When** the operator restarts the application, **Then** the system detects stale active state and transitions the job to a resumable state with resume guidance.
+10. **Given** the application was force-closed while a job was active, **When** the operator restarts the application, **Then** the system blocks new-job creation until stale-state detection/transition completes and then presents resumable-state guidance.
 
 ---
 
@@ -70,6 +70,8 @@ As an editor, I receive high-quality automatic performance segment boundaries an
 5. **Given** the operator changes the low-confidence threshold for a job, **When** detection results are refreshed, **Then** the set of items requiring confirmation follows the updated threshold.
 6. **Given** a validation sample with known timing offsets, **When** synchronization completes, **Then** alignment error stays within the defined quality tolerance or the output is flagged for manual correction.
 7. **Given** multimodal boundary detection runs, **When** audio applause/silence transitions and visual performance cues disagree, **Then** the system presents confidence-weighted candidates for operator confirmation.
+8. **Given** only one audio-capable source exists and it is the embedded audio in the video, **When** the synchronization stage is reached, **Then** synchronization is automatically skipped and processing continues.
+9. **Given** the video has no usable embedded audio and exactly one external audio source, **When** the synchronization stage is reached, **Then** the system requires user-guided manual synchronization before continuing.
 
 ---
 
@@ -84,7 +86,7 @@ As a publisher, I can automatically produce publish-ready media assets and send 
 **Acceptance Scenarios**:
 
 1. **Given** finalized segments and metadata, **When** the operator starts publishing, **Then** outputs are published in the configured order with expected metadata.
-2. **Given** a network interruption during publishing, **When** connectivity returns, **Then** publishing resumes or retries without duplicating already published items.
+2. **Given** a network interruption during publishing, **When** connectivity returns, **Then** publishing resumes or retries without duplicating already published items and attempts automated recovery per output item within 15 minutes of first transient failure before manual intervention.
 3. **Given** optional opening title overlay is enabled, **When** export occurs, **Then** each output includes the opening title for the configured duration.
 4. **Given** publishing is configured to a non-approved destination, **When** the operator starts publishing, **Then** execution is blocked with a clear policy violation message.
 
@@ -120,6 +122,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - Timestamp-based classification is selected but recording-time metadata is missing or invalid.
 - Timestamp-based classification is selected but event schedule metadata is unavailable, so event-window bounds cannot be derived.
 - Application is force-closed while a job is marked active and must be recovered safely on restart.
+- Single-source audio jobs where embedded video audio is absent and only one external source is available.
 
 ## Requirements *(mandatory)*
 
@@ -161,6 +164,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-033**: When audio-transition and visual-cue evidence disagree in boundary detection, the system MUST present confidence-weighted modality candidates for operator confirmation.
 - **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid and event schedule metadata MUST provide derivable event-window bounds; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
 - **FR-035**: On startup, the system MUST detect stale active-job states with no running process and transition them to resumable state before allowing new-job creation.
+- **FR-036**: For single-audio-source jobs, the system MUST auto-skip synchronization when the source is embedded video audio only, and MUST require user-guided manual synchronization when embedded video audio is unavailable and only one external source exists.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -200,6 +204,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-033** is accepted when evidence-disagreement cases surface confidence-weighted modality candidates and require explicit operator confirmation.
 - **FR-034** is accepted when missing/invalid recording-time metadata, out-of-window timestamps, or unavailable event-window bounds (per event capture window rules) block timestamp-based classification and present corrective or strategy-switch guidance.
 - **FR-035** is accepted when restart after forced shutdown converts stale active jobs to resumable state, presents resume guidance, and blocks new-job creation until stale-state detection/transition completes.
+- **FR-036** is accepted when single-source embedded-video-audio jobs skip synchronization automatically, while single-source external-audio-only jobs require explicit user-guided manual synchronization.
 
 ### Constitutional Requirements *(mandatory)*
 
@@ -298,7 +303,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **SC-002**: In a 20-run long-recording validation set, zero runs fail due to memory exhaustion.
 - **SC-003**: At least 85% of automatically proposed performance segments (start/end boundary pair) are accepted without manual boundary edits, measured over at least 200 segment candidates.
 - **SC-004**: At least 90% of first-time operators can configure and launch a valid job within 8 minutes, measured across at least 10 participants.
-- **SC-005**: At least 98% of transient publishing failures recover automatically within 15 minutes without duplicate published outputs, measured across at least 100 injected transient-failure publish attempts.
+- **SC-005**: At least 98% of transient publishing failures recover automatically within 15 minutes per output item without duplicate published outputs, measured across at least 100 injected transient-failure publish attempts.
 - **SC-006**: Pilot operators rate workflow transparency and error guidance at 4.0/5.0 or higher in post-run feedback, measured across at least 10 respondents.
 - **SC-007**: At least 90% of first-time non-engineering users can install and open the packaged application in under 10 minutes, measured across at least 10 participants.
 - **SC-008**: In the 20-run synchronization validation set, at least 90% of outputs achieve median alignment error <= 80 ms without manual correction, and all remaining outputs are clearly flagged for manual timing correction.
