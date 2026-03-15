@@ -207,7 +207,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-038**: The system MUST not auto-delete execution history or intermediate media artifacts, and MUST provide simple UI actions for operators to manually delete non-audit records and files.
 - **FR-039**: The system MUST officially support input video containers `MP4`/`MOV`/`MKV`/`MTS`, input audio formats `WAV`/`FLAC`/`AAC`, metadata formats `CSV`/`JSON` (UTF-8), and output media in `MP4` container with `AAC` audio.
 - **FR-040**: The system MUST enforce immutable `job_id` (UUID) identity for each processing job, unique checkpoint identity by (`job_id`, `stage_name`, `attempt`), and unique publishing dedup identity by (`job_id`, `segment_id`, `destination`).
-- **FR-041**: The system MUST monitor local free storage and apply thresholds: warning below `20 GB`, block new job starts below `10 GB`, and safely pause active jobs below `5 GB` while showing operator cleanup guidance.
+- **FR-041**: The system MUST monitor local free storage and apply thresholds: warning below `20 GB`, block new job starts below `10 GB`, and safely pause active jobs below `5 GB` while showing operator cleanup guidance; after storage recovery above blocking thresholds, resume/start MUST require explicit operator confirmation.
 - **FR-042**: The system MUST enforce processing-job lifecycle transitions where normal execution allows `running -> completed|failed|canceled`, while interruption recovery uses `running -> paused -> resumable -> running`, and MUST reject invalid transitions with actionable operator guidance.
 - **FR-043**: The system MUST provide Japanese-language UI coverage for all operator-facing workflows in this specification, and MUST externalize UI strings to support future multilingual extension.
 - **FR-044**: The system MUST support keyboard-only execution of all primary operator workflows, provide visible focus indication on interactive controls, and meet WCAG 2.1 AA-equivalent contrast requirements on primary screens.
@@ -262,7 +262,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-038** is accepted when non-audit records and intermediate artifacts remain until operator deletion, operators can remove selected items through direct UI actions without command-line or file-system manual steps, and deletion attempts against the minimal audit ledger are blocked.
 - **FR-039** is accepted when test jobs using each supported input format (`MP4`/`MOV`/`MKV`/`MTS`, `WAV`/`FLAC`/`AAC`, `CSV`/`JSON`) are ingested successfully and exported outputs are generated as `MP4` with `AAC` audio.
 - **FR-040** is accepted when duplicate checkpoint records for the same (`job_id`, `stage_name`, `attempt`) are rejected and duplicate publish attempts for the same (`job_id`, `segment_id`, `destination`) are blocked by dedup identity rules.
-- **FR-041** is accepted when capacity monitoring triggers warning (`<20 GB`), start blocking (`<10 GB`), and safe pause (`<5 GB`) behavior with explicit cleanup guidance and resumable-state preservation.
+- **FR-041** is accepted when capacity monitoring triggers warning (`<20 GB`), start blocking (`<10 GB`), and safe pause (`<5 GB`) behavior with explicit cleanup guidance and resumable-state preservation, and resume/start remains blocked until explicit operator confirmation after recovery.
 - **FR-042** is accepted when valid direct terminal transitions from `running` succeed, recovery transitions through `paused/resumable` succeed for interrupted runs, invalid transitions are blocked, and blocked attempts include guidance for the nearest valid next state.
 - **FR-043** is accepted when all setup/progress/review/publish flows are fully usable in Japanese UI text and string resources are not hard-coded in workflow logic.
 - **FR-044** is accepted when primary setup/progress/review/publish workflows are fully operable by keyboard only, focus is visibly trackable on each actionable UI component, and contrast checks pass for defined primary screens.
@@ -285,6 +285,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **CR-007 (Simplicity)**: The feature MUST favor the simplest design that satisfies current requirements and avoid speculative abstractions.
 - **CR-008 (Observability)**: Core processing stages MUST emit structured events for start, completion, and failure paths with stage and job context.
 - **CR-009 (Tradeoff Priority)**: When requirements conflict, decision priority MUST be `data integrity & deduplication` > `recoverability` > `operator usability` > `performance optimization` > `implementation cost`.
+- **CR-010 (GUI-Independent Business Logic Tests)**: Business-logic tests for core modules MUST execute independently of GUI-layer dependencies.
 
 ### Constitutional Verification Plan
 
@@ -297,6 +298,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **CR-007 Verification**: Planning notes MUST justify why selected architecture is the minimum structure needed and identify rejected speculative abstractions.
 - **CR-008 Verification**: Test plan MUST verify structured event emission for start/completion/failure across each core processing stage.
 - **CR-009 Verification**: Design decisions that involve tradeoffs MUST reference the priority order and explain why higher-priority criteria are preserved.
+- **CR-010 Verification**: Test suite design MUST include core business-logic tests that run without GUI-layer dependencies.
 
 ### Key Entities *(include if feature involves data)*
 
