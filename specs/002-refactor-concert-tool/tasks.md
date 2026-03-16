@@ -21,7 +21,7 @@
 - [ ] T003 [P] Configure lint/type/test tooling defaults in `pyproject.toml`.
 - [ ] T004 [P] Create shared test fixtures for SQLite/media stubs in `tests/conftest.py`.
 - [ ] T005 [P] Add workflow stage constants and enums in `src/cvcutter/domain/jobs/stages.py`.
-- [ ] T006 Create Flet shell bootstrap wiring in `src/cvcutter/app.py` and `src/cvcutter/presentation/flet_app/main_view.py`.
+- [ ] T006 Create Flet shell bootstrap wiring in `src/cvcutter/app.py`.
 
 ---
 
@@ -57,16 +57,16 @@
 - [ ] T017 [P] [US1] Add interrupted-run resume integration test in `tests/integration/workflows/test_resume_from_first_incomplete_stage.py`.
 - [ ] T018 [P] [US1] Add retry-policy RED tests (`Retry-After`, backoff+jitter, escalation) in `tests/unit/application/test_retry_controller.py`.
 - [ ] T019 [P] [US1] Add storage-threshold RED behavior tests in `tests/integration/workflows/test_storage_threshold_policy.py`.
-- [ ] T020 [P] [US1] Add startup stale-state recovery RED tests in `tests/integration/workflows/test_startup_stale_recovery.py`.
+- [ ] T020 [P] [US1] Add startup stale-state and post-checkpoint config-change resume-gate RED tests in `tests/integration/workflows/test_resume_safety_guards.py`.
 
 ### Implementation for User Story 1
 
-- [ ] T021 [US1] Implement stage orchestrator with checkpoint persistence in `src/cvcutter/application/workflows/processing_workflow.py`.
-- [ ] T022 [US1] Implement resume service selecting first incomplete stage in `src/cvcutter/application/services/resume_service.py`.
+- [ ] T021 [US1] Implement stage orchestrator with checkpoint persistence and run-history projection in `src/cvcutter/application/workflows/processing_workflow.py`.
+- [ ] T022 [US1] Implement resume service selecting first incomplete stage with invalidate-or-cancel gate in `src/cvcutter/application/services/resume_service.py`.
 - [ ] T023 [US1] Implement retry controller with idempotent operation envelope in `src/cvcutter/application/services/retry_controller.py`.
 - [ ] T024 [US1] Implement storage safety policy and operator-confirmed unblock gate in `src/cvcutter/application/services/storage_safety_service.py`.
 - [ ] T025 [US1] Implement startup stale-state recovery and new-job blocking in `src/cvcutter/application/services/startup_recovery_service.py`.
-- [ ] T026 [US1] Implement chronological run-history reader service in `src/cvcutter/application/services/run_history_service.py`.
+- [ ] T026 [US1] Implement config-change detector and decision recorder for resume gating in `src/cvcutter/application/services/config_change_guard_service.py`.
 
 **Checkpoint**: US1 is independently functional and testable (MVP scope).
 
@@ -82,7 +82,7 @@
 
 - [ ] T027 [P] [US2] Add setup-wizard validation RED tests in `tests/integration/presentation/test_setup_wizard_validation.py`.
 - [ ] T028 [P] [US2] Add progress dashboard RED tests in `tests/integration/presentation/test_progress_dashboard_state.py`.
-- [ ] T029 [P] [US2] Add no-confident-match guidance RED tests in `tests/unit/domain/classification/test_no_confident_match_guidance.py`.
+- [ ] T029 [P] [US2] Add content-matching trace-context and no-confident-match RED tests in `tests/unit/domain/classification/test_content_matching_guidance.py`.
 - [ ] T030 [P] [US2] Add timestamp-strategy validity RED tests in `tests/unit/domain/classification/test_timestamp_strategy_validity.py`.
 - [ ] T031 [P] [US2] Add model-availability fallback/block RED tests in `tests/unit/application/test_model_availability_policy.py`.
 
@@ -93,7 +93,7 @@
 - [ ] T034 [US2] Implement progress dashboard viewmodel in `src/cvcutter/presentation/flet_app/viewmodels/progress_dashboard_viewmodel.py`.
 - [ ] T035 [US2] Implement confidence scoring policy (`>=70` and `+10 margin`) in `src/cvcutter/domain/classification/confidence_policy.py`.
 - [ ] T036 [US2] Implement per-job strategy persistence/restore in `src/cvcutter/application/services/classification_strategy_service.py`.
-- [ ] T037 [US2] Implement no-confident-match recovery guidance service in `src/cvcutter/application/services/classification_guidance_service.py`.
+- [ ] T037 [US2] Implement transcription-to-program matching with trace-context output and recovery guidance in `src/cvcutter/application/services/classification_guidance_service.py`.
 - [ ] T038 [US2] Implement timestamp metadata validator with remediation guidance in `src/cvcutter/domain/classification/timestamp_validator.py`.
 - [ ] T039 [US2] Implement model preflight and reduced-confidence fallback policy in `src/cvcutter/application/services/model_preflight_service.py`.
 
@@ -141,7 +141,7 @@
 - [ ] T053 [P] [US4] Add publish dedup/retry RED integration tests in `tests/integration/publishing/test_publish_dedup_retry.py`.
 - [ ] T054 [P] [US4] Add non-approved destination policy RED tests in `tests/unit/domain/publishing/test_destination_policy.py`.
 - [ ] T055 [P] [US4] Add metadata schema compatibility RED contract tests in `tests/contract/test_metadata_schema_contract.py`.
-- [ ] T056 [P] [US4] Add opening-title overlay RED integration tests in `tests/integration/media/test_opening_title_overlay.py`.
+- [ ] T056 [P] [US4] Add supported format matrix RED integration tests in `tests/integration/media/test_format_support_matrix.py`.
 - [ ] T057 [P] [US4] Add plaintext credential consent-gate RED tests in `tests/integration/presentation/test_plaintext_credential_consent.py`.
 
 ### Implementation for User Story 4
@@ -152,7 +152,7 @@
 - [ ] T061 [US4] Implement destination allowlist policy gate in `src/cvcutter/domain/policies/destination_policy.py`.
 - [ ] T062 [US4] Implement metadata import normalizer/validator with version mapping in `src/cvcutter/application/services/metadata_import_service.py`.
 - [ ] T063 [US4] Implement segment-to-metadata mapping enforcement in `src/cvcutter/application/services/metadata_mapping_service.py`.
-- [ ] T064 [US4] Implement opening-title renderer pipeline in `src/cvcutter/infrastructure/media/title_overlay_renderer.py`.
+- [ ] T064 [US4] Implement export pipeline with format-matrix validation and opening-title rendering in `src/cvcutter/infrastructure/media/export_pipeline.py`.
 - [ ] T065 [US4] Implement credential risk-warning and consent UI flow in `src/cvcutter/presentation/flet_app/views/credential_risk_dialog.py`.
 
 **Checkpoint**: US4 independently supports policy-safe automated publishing.
@@ -176,7 +176,7 @@
 - [ ] T069 [US5] Implement supported-platform compatibility checker in `src/cvcutter/infrastructure/packaging/platform_compatibility.py`.
 - [ ] T070 [US5] Implement packaged bootstrap/onboarding handoff in `src/cvcutter/app.py`.
 - [ ] T071 [US5] Implement onboarding screens and first-draft entry flow in `src/cvcutter/presentation/flet_app/views/onboarding_view.py`.
-- [ ] T072 [US5] Implement desktop packaging configuration in `build_exe.py` and `pyproject.toml`.
+- [ ] T072 [US5] Implement desktop packaging configuration in `build_exe.py`.
 
 **Checkpoint**: US5 independently supports install and first launch.
 
@@ -190,15 +190,15 @@
 - [ ] T074 [P] Add cleanup-retention contract regression tests in `tests/contract/test_cleanup_retention_contract.py`.
 - [ ] T075 [P] Add processing-event payload regression tests in `tests/contract/test_processing_event_payloads.py`.
 - [ ] T076 Implement executable-role enforcement policy in `src/cvcutter/domain/policies/authorization_policy.py`.
-- [ ] T077 Implement cleanup manager with protected-audit rejection in `src/cvcutter/application/services/cleanup_service.py`.
-- [ ] T078 Implement cleanup event emission service in `src/cvcutter/infrastructure/observability/cleanup_events.py`.
+- [ ] T077 Implement cleanup manager with protected-audit rejection and event writes in `src/cvcutter/application/services/cleanup_service.py`.
+- [ ] T078 Implement cleanup action controller and protected-ledger rejection messaging in `src/cvcutter/presentation/flet_app/controllers/cleanup_controller.py`.
 - [ ] T079 Update Japanese localization resource coverage in `src/cvcutter/presentation/flet_app/localization/ja_jp.json`.
 - [ ] T080 Produce FR traceability matrix in `specs/002-refactor-concert-tool/checklists/traceability-matrix.md`.
 - [ ] T081 Add FR-046 compliance-scope guard tests in `tests/integration/governance/test_compliance_scope_guard.py`.
 - [ ] T082 Implement compliance-scope verification service in `src/cvcutter/application/services/compliance_scope_service.py`.
 - [ ] T083 Run `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` and record outputs in `specs/002-refactor-concert-tool/checklists/quality-gates.md`.
-- [ ] T084 Run quickstart validation scenarios and record results in `specs/002-refactor-concert-tool/checklists/quickstart-validation.md`.
-- [ ] T085 Execute GUI-independent core test suite and record evidence in `specs/002-refactor-concert-tool/checklists/gui-independent-core-tests.md`.
+- [ ] T084 Define SC-001..SC-010 measurement protocol and capture templates in `specs/002-refactor-concert-tool/checklists/success-criteria-protocol.md`.
+- [ ] T085 Execute SC-001..SC-010 runs plus quickstart/gui-independent validations and publish report in `specs/002-refactor-concert-tool/checklists/success-criteria-report.md`.
 
 ---
 
@@ -244,7 +244,7 @@
 T017 tests/integration/workflows/test_resume_from_first_incomplete_stage.py
 T018 tests/unit/application/test_retry_controller.py
 T019 tests/integration/workflows/test_storage_threshold_policy.py
-T020 tests/integration/workflows/test_startup_stale_recovery.py
+T020 tests/integration/workflows/test_resume_safety_guards.py
 
 # Parallel implementation after orchestrator foundation
 T023 src/cvcutter/application/services/retry_controller.py
@@ -258,7 +258,7 @@ T025 src/cvcutter/application/services/startup_recovery_service.py
 # Parallel RED tests for US2
 T027 tests/integration/presentation/test_setup_wizard_validation.py
 T028 tests/integration/presentation/test_progress_dashboard_state.py
-T029 tests/unit/domain/classification/test_no_confident_match_guidance.py
+T029 tests/unit/domain/classification/test_content_matching_guidance.py
 T030 tests/unit/domain/classification/test_timestamp_strategy_validity.py
 T031 tests/unit/application/test_model_availability_policy.py
 
@@ -292,13 +292,13 @@ T052 tests/contract/test_external_integration_adapter_contract.py
 T053 tests/integration/publishing/test_publish_dedup_retry.py
 T054 tests/unit/domain/publishing/test_destination_policy.py
 T055 tests/contract/test_metadata_schema_contract.py
-T056 tests/integration/media/test_opening_title_overlay.py
+T056 tests/integration/media/test_format_support_matrix.py
 T057 tests/integration/presentation/test_plaintext_credential_consent.py
 
 # Parallel implementation after adapter contracts are stable
 T061 src/cvcutter/domain/policies/destination_policy.py
 T062 src/cvcutter/application/services/metadata_import_service.py
-T064 src/cvcutter/infrastructure/media/title_overlay_renderer.py
+T064 src/cvcutter/infrastructure/media/export_pipeline.py
 T065 src/cvcutter/presentation/flet_app/views/credential_risk_dialog.py
 ```
 
