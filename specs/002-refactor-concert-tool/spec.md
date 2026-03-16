@@ -2,8 +2,14 @@
 
 **Feature Branch**: `002-refactor-concert-tool`  
 **Created**: 2026-03-12  
-**Status**: Ready for Planning  
+**Status**: Ready for Implementation  
 **Input**: User description: "`@refact-plan.md specify` (large-scale refactor plan for concert video splitting, audio synchronization, and automated publishing workflow)"
+
+## Overview & Context
+
+CVCutter is being refactored into a deterministic desktop workflow for concert media processing and publishing. The feature targets operator-led end-to-end execution across ingest, segmentation, synchronization, metadata mapping, export, and approved-destination publishing.
+
+The primary objective is to improve resume safety, retry idempotency, and operator transparency while preserving constitutional constraints (layered architecture, stream-first processing, TDD evidence, approved integrations, and quality gates). Scope is limited to Windows/macOS desktop workflows; cloud-distributed execution and mobile UI are out of scope.
 
 ## Clarifications
 
@@ -88,7 +94,7 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 
 ### User Story 3 - Accurate Segmenting and Audio Alignment (Priority: P3)
 
-As an editor, I receive high-quality automatic performance segment boundaries and synchronized audio outputs, with operator adjustments when confidence is low.
+As an editor, I receive automatically proposed performance segment boundaries and synchronized audio outputs that are measured against SC-003 and SC-008 quality targets, with operator adjustments when confidence is low.
 
 **Why this priority**: Output quality determines whether the automation is trusted for production use.
 
@@ -110,7 +116,7 @@ As an editor, I receive high-quality automatic performance segment boundaries an
 
 ### User Story 4 - Stable Automated Publishing (Priority: P4)
 
-As a publisher, I can automatically produce publish-ready media assets and send them to approved external destinations with robust recovery from network instability.
+As a publisher, I can automatically produce publish-ready media assets and send them to approved external destinations with retry/recovery behavior that conforms to FR-017 and SC-005.
 
 **Why this priority**: Publishing automation is valuable after core processing is reliable and visible.
 
@@ -185,26 +191,26 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-017**: The system MUST retry transient external-service failures with safe retry behavior, prioritize `Retry-After` when present, otherwise use exponential backoff with jitter (1s initial delay, 60s max delay), escalate to manual intervention after 15 minutes from first transient failure for that operation, and record retry outcomes.
 - **FR-018**: The system MUST retain an auditable execution history for job creation, stage transitions, retries, and completion outcomes.
 - **FR-019**: Operators MUST be able to select a classification strategy per job, where content-based classification uses pre-performance speech transcription matched against program/song-list metadata and returns confidence with traceable source context, and timestamp-based classification uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
-- **FR-020**: The system MUST provide a packaged runtime experience suitable for non-engineering users to install and run on supported workstation environments without manual developer setup.
+- **FR-020**: The system MUST provide a packaged desktop runtime with first-launch onboarding that non-engineering users can install and run without developer tooling on in-scope platforms defined by FR-047.
 - **FR-021**: The system MUST detect configuration changes made after checkpoint creation and apply a defined configuration-to-stage dependency map to require explicit checkpoint invalidation or cancellation before resume.
 - **FR-022**: The system MUST allow operators to configure the low-confidence boundary-detection threshold per job on a 0-100 scale, with a default threshold of 70.
 - **FR-023**: The system MUST continue processing when optional hardware acceleration is unavailable by using a CPU-compatible execution path.
 - **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
 - **FR-025**: The system MUST evaluate per-output synchronization quality against an 80 ms median alignment tolerance and MUST flag outputs that exceed tolerance for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator guidance to switch strategy and adjust matching inputs.
-- **FR-027**: The system MUST block installation on unsupported workstation environments and explicitly support Windows desktop (10/11, 64-bit) and macOS 13+ desktop environments (Apple Silicon and Intel).
+- **FR-027**: The system MUST validate installer/runtime environment compatibility and block installation and startup on unsupported workstation environments, with explicit support for Windows desktop (10/11, 64-bit) and macOS 13+ desktop environments (Apple Silicon and Intel).
 - **FR-028**: The system MUST verify required local analysis models before model-dependent stages, allow reduced-confidence fallback when at least one viable modality remains, and block with remediation guidance when no viable modality remains.
 - **FR-029**: The system MUST score classification confidence on a 0-100 scale and treat a result as confident only when the top candidate score is >= 70 and at least 10 points above the next candidate.
   When only one candidate exists, the margin condition is considered satisfied.
 - **FR-030**: The system MUST migrate the UI layer from customtkinter to Flet and implement all operator-facing workflows defined in this specification.
 - **FR-031**: The system MUST enforce workstation-wide single-active-job execution (including cross-process/app-instance starts) and provide user-facing guidance when another job is already running.
-- **FR-032**: For transient publishing failures, the retry workflow MUST attempt automated recovery within a 15-minute window per output item, measured from the first transient failure event, before requiring manual intervention.
+- **FR-032**: For transient publishing failures, the publishing workflow MUST apply FR-017 retry policy per output item and preserve idempotent publish behavior across retries/resume attempts (see FR-006 and FR-040).
 - **FR-033**: When audio-transition and visual-cue evidence disagree in boundary detection, the system MUST present confidence-weighted modality candidates for operator confirmation.
 - **FR-034**: When timestamp-based classification is selected, recording-time metadata MUST be present and valid and event schedule metadata MUST provide derivable event-window bounds; otherwise classification MUST be blocked with guidance to correct metadata or switch strategy.
 - **FR-035**: On startup, the system MUST detect stale active-job states with no running process and transition them through `paused` to `resumable` state before allowing new-job creation.
 - **FR-036**: For single-audio-source jobs, the system MUST auto-skip synchronization when the source is embedded video audio only, and MUST require user-guided manual synchronization when embedded video audio is unavailable and only one external source exists.
 - **FR-037**: The system MUST permit external-service credentials to be stored in plaintext local configuration files for simplified single-user workstation setup, and MUST require explicit user acknowledgment of the associated security risk with clear warning text before enabling this mode.
-- **FR-038**: The system MUST not auto-delete execution history or intermediate media artifacts, and MUST provide simple UI actions for operators to manually delete non-audit records and files.
+- **FR-038**: The system MUST not auto-delete execution history or intermediate media artifacts, and MUST provide in-app deletion controls so operators can remove selected non-audit records/files without command-line operations or direct file-system manipulation.
 - **FR-039**: The system MUST officially support input video containers `MP4`/`MOV`/`MKV`/`MTS`, input audio formats `WAV`/`FLAC`/`AAC`, metadata formats `CSV`/`JSON` (UTF-8), and output media in `MP4` container with `AAC` audio.
 - **FR-040**: The system MUST enforce immutable `job_id` (UUID) identity for each processing job, unique checkpoint identity by (`job_id`, `stage_name`, `attempt`), and unique publishing dedup identity by (`job_id`, `segment_id`, `destination`).
 - **FR-041**: The system MUST monitor local free storage and apply thresholds: warning below `20 GB`, block new job starts below `10 GB`, and safely pause active jobs below `5 GB` while showing operator cleanup guidance; after storage recovery above blocking thresholds, resume/start MUST require explicit operator confirmation.
@@ -217,7 +223,16 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-048**: The system MUST apply an exclusive edit lock for each job draft and block concurrent edit attempts from other app instances with user-facing lock guidance.
 - **FR-049**: The system MUST require `schema_version` in imported metadata payloads, apply explicit compatibility mapping for older versions, and support at least the immediately previous metadata schema version.
 - **FR-050**: The system MUST use a single executable authorization role (`operator`) for workflows in this feature, while allowing `editor` and `publisher` labels as scenario-context descriptors only.
-- **FR-051**: The system MUST retain a non-deletable minimal audit ledger containing job identifier, job creation event, stage transitions, retry outcomes, terminal completion outcome, and timestamps.
+- **FR-051**: The system MUST retain a non-deletable minimal immutable audit ledger as a protected subset of FR-018, containing job identifier, job creation event, stage transitions, retry outcomes, terminal completion outcome, and timestamps.
+
+### Non-Functional Requirements
+
+- **NFR-001 (Performance & Memory Bound)**: Long-media processing MUST satisfy memory-bounded execution targets defined by FR-013 and SC-002.
+- **NFR-002 (Reliability & Recovery)**: Retry/resume behavior MUST be deterministic and idempotent under transient failures, following FR-004, FR-006, FR-017, FR-032, and SC-005.
+- **NFR-003 (Observability)**: Core stages MUST emit structured diagnostic events conforming to FR-024 and CR-008.
+- **NFR-004 (Accessibility & Localization)**: Primary operator workflows MUST satisfy FR-043 and FR-044, including Japanese-first coverage, keyboard-only operation, and WCAG-equivalent contrast requirements.
+- **NFR-005 (Platform & Compatibility)**: Installer/runtime compatibility MUST satisfy FR-027, FR-039, FR-045, and FR-047 constraints.
+- **NFR-006 (Compliance Scope Guard)**: Delivery artifacts MUST demonstrate FR-046 by proving no additional external regulatory workflows are introduced within feature scope.
 
 ### Functional Requirement Acceptance Criteria
 
@@ -240,20 +255,20 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-017** is accepted when transient failures (including HTTP 429 rate limiting) retry safely using `Retry-After` when available or exponential backoff with jitter otherwise, operations exceeding 15 minutes from first transient failure are escalated to manual intervention, and retry outcomes are recorded.
 - **FR-018** is accepted when chronological run history includes creation, stage transitions, retries, and outcomes.
 - **FR-019** is accepted when selected strategy is persisted per job, content-based mode uses speech-transcription-to-program-list matching with confidence and source-context output, and timestamp mode uses recording-time metadata plus event schedule metadata with derivable event-window bounds.
-- **FR-020** is accepted when non-engineering users can install and launch without developer tooling steps.
+- **FR-020** is accepted when non-engineering users can install, first-launch, and start onboarding without developer tooling steps on in-scope desktop platforms.
 - **FR-021** is accepted when post-checkpoint config changes trigger explicit invalidate-or-cancel decisions based on a documented stage-dependency mapping.
 - **FR-022** is accepted when the boundary-confidence threshold is editable on a 0-100 scale and defaults to 70.
 - **FR-023** is accepted when jobs run to completion on environments without hardware acceleration.
 - **FR-024** is accepted when structured start/completion/failure events are present for each core step.
 - **FR-025** is accepted when outputs exceeding 80 ms median alignment tolerance are automatically flagged for manual timing correction before publish.
 - **FR-026** is accepted when no-confident-match results trigger guided recovery options that include strategy switch and matching-input adjustment.
-- **FR-027** is accepted when installation attempts outside supported Windows 10/11 64-bit or macOS 13+ (Apple Silicon/Intel) environments are blocked with clear supported-environment guidance.
+- **FR-027** is accepted when installation and startup attempts outside supported Windows 10/11 64-bit or macOS 13+ (Apple Silicon/Intel) environments are blocked with clear supported-environment guidance.
 - **FR-028** is accepted when missing local models trigger reduced-confidence fallback for viable single-modality runs and trigger blocking remediation when no viable modality remains.
 - **FR-029** is accepted when classification confidence uses the defined 0-100 scoring rule and no-confident-match conditions follow the fixed-threshold-plus-margin criteria.
   Single-candidate cases are accepted when score >= 70 and the system applies the documented single-candidate margin rule.
 - **FR-030** is accepted when a workflow traceability matrix demonstrates that every operator-facing workflow required by this specification is implemented in the Flet UI (including setup, progress, review, publish, lock/error guidance, and recovery flows).
 - **FR-031** is accepted when attempts to start a second active job from the same workstation (including separate app instances/processes) are blocked with clear user guidance.
-- **FR-032** is accepted when each output item either recovers automatically within 15 minutes of first transient failure or is escalated with explicit manual-intervention guidance.
+- **FR-032** is accepted when publish-failure handling demonstrably reuses FR-017 policy per output item and keeps publish behavior idempotent across retries/resume attempts.
 - **FR-033** is accepted when evidence-disagreement cases surface confidence-weighted modality candidates and require explicit operator confirmation.
 - **FR-034** is accepted when missing/invalid recording-time metadata, out-of-window timestamps, or unavailable event-window bounds (per event capture window rules) block timestamp-based classification and present corrective or strategy-switch guidance.
 - **FR-035** is accepted when restart after forced shutdown transitions stale active jobs through `paused` to `resumable`, presents resume guidance, and blocks new-job creation until stale-state detection/transition completes.
@@ -267,12 +282,12 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-043** is accepted when all setup/progress/review/publish flows are fully usable in Japanese UI text and string resources are not hard-coded in workflow logic.
 - **FR-044** is accepted when primary setup/progress/review/publish workflows are fully operable by keyboard only, focus is visibly trackable on each actionable UI component, and contrast checks pass for defined primary screens.
 - **FR-045** is accepted when approved-service inventory includes pinned API versions, compatibility checks run before integration-dependent operations, and incompatible-version cases are blocked with explicit update/remediation guidance.
-- **FR-046** is accepted when delivery artifacts define no new external regulatory process gates and rely on existing constitutional controls only.
+- **FR-046** is accepted when an explicit compliance-scope verification artifact confirms no new external regulatory process gates were introduced and all workflows rely on existing constitutional controls only.
 - **FR-047** is accepted when feature tasks and validation artifacts contain no cloud-distributed execution flow and no mobile UI delivery scope.
 - **FR-048** is accepted when concurrent edit attempts on the same job draft are blocked while the lock owner is active, and blocked users receive clear lock-owner and retry guidance.
 - **FR-049** is accepted when metadata imports without `schema_version` are rejected with guidance, and imports using the immediately previous schema version are accepted through documented compatibility mapping.
 - **FR-050** is accepted when no distinct permission model is required for `editor` or `publisher` tasks and all such flows are executable under the `operator` role.
-- **FR-051** is accepted when canonical audit entries (job identifier, job creation, stage transitions, retry outcomes, terminal completion outcome, timestamps) are preserved and cannot be removed through operator cleanup actions.
+- **FR-051** is accepted when canonical minimal-ledger audit entries (job identifier, job creation, stage transitions, retry outcomes, terminal completion outcome, timestamps) are preserved as immutable records and cannot be removed through operator cleanup actions.
 
 ### Constitutional Requirements *(mandatory)*
 
