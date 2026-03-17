@@ -33,14 +33,14 @@
 
 - [ ] T007 [P] Add lifecycle transition RED tests for `ProcessingJob` in `tests/unit/domain/jobs/test_processing_job_lifecycle.py`.
 - [ ] T008 [P] Add uniqueness and cross-process lock contention RED tests for checkpoint/publish keys and active-job/draft locks in `tests/integration/persistence/test_uniqueness_constraints.py`.
-- [ ] T009 [P] Add processing-event envelope RED contract tests in `tests/contract/test_processing_event_contract.py`.
-- [ ] T010 Implement `ProcessingJob` aggregate transitions and guards in `src/cvcutter/domain/jobs/processing_job.py`.
+- [ ] T009 [P] Add processing-event envelope/retry-payload/immutability RED contract tests in `tests/contract/test_processing_event_contract.py`.
+- [ ] T010 Implement `ProcessingJob` aggregate transitions with executable-role guard hooks in `src/cvcutter/domain/jobs/processing_job.py`.
 - [ ] T011 Implement SQLite base schema for jobs/checkpoints/config-change-records/segments/audio/mapping/publishing/events/locks/role-policy in `src/cvcutter/infrastructure/persistence/migrations/001_initial_schema.sql`.
 - [ ] T012 Implement persistence repositories for core aggregates including `OperatorRolePolicy` and `ConfigurationChangeRecord` in `src/cvcutter/infrastructure/persistence/repositories.py`.
-- [ ] T013 Implement append-only event ledger writer in `src/cvcutter/infrastructure/observability/event_ledger.py`.
+- [ ] T013 Implement append-only event ledger writer with mutation/deletion guards in `src/cvcutter/infrastructure/observability/event_ledger.py`.
 - [ ] T014 Implement workstation active-job + draft-lock management in `src/cvcutter/application/services/lock_service.py`.
 - [ ] T015 Implement configuration-change dependency map policy in `src/cvcutter/domain/checkpoints/config_dependency_map.py`.
-- [ ] T016 [P] Add GUI-independent core test target setup in `tests/unit/core/test_gui_independent_core.py`.
+- [ ] T016 [P] Add operator-role normalization RED contract tests in `tests/contract/test_authorization_role_contract.py`.
 
 **Checkpoint**: Foundation complete; user stories can proceed.
 
@@ -91,7 +91,7 @@
 - [ ] T032 [US2] Implement setup wizard viewmodel in `src/cvcutter/presentation/flet_app/viewmodels/setup_wizard_viewmodel.py`.
 - [ ] T033 [US2] Implement setup wizard screens with inline guidance and externalized Japanese strings in `src/cvcutter/presentation/flet_app/views/setup_wizard_view.py`.
 - [ ] T034 [US2] Implement progress dashboard viewmodel in `src/cvcutter/presentation/flet_app/viewmodels/progress_dashboard_viewmodel.py`.
-- [ ] T035 [US2] Implement confidence scoring policy (`>=70` and `+10 margin`) in `src/cvcutter/domain/classification/confidence_policy.py`.
+- [ ] T035 [US2] Implement confidence scoring policy and classification output payload schema (`strategy`, scores, confidence_state, reason_codes, trace_context) in `src/cvcutter/domain/classification/confidence_policy.py`.
 - [ ] T036 [US2] Implement per-job strategy persistence/restore in `src/cvcutter/application/services/classification_strategy_service.py`.
 - [ ] T037 [US2] Implement transcription-to-program matching with trace-context output and recovery guidance in `src/cvcutter/application/services/classification_guidance_service.py`.
 - [ ] T038 [US2] Implement timestamp metadata validator with remediation guidance in `src/cvcutter/domain/classification/timestamp_validator.py`.
@@ -137,7 +137,7 @@
 
 ### Tests for User Story 4 (write and fail first)
 
-- [ ] T052 [P] [US4] Add external adapter contract RED tests in `tests/contract/test_external_integration_adapter_contract.py`.
+- [ ] T052 [P] [US4] Add external adapter contract RED tests including `fetch_form_responses` operation in `tests/contract/test_external_integration_adapter_contract.py`.
 - [ ] T053 [P] [US4] Add publish dedup/retry RED integration tests in `tests/integration/publishing/test_publish_dedup_retry.py`.
 - [ ] T054 [P] [US4] Add non-approved destination policy RED tests in `tests/unit/domain/publishing/test_destination_policy.py`.
 - [ ] T055 [P] [US4] Add metadata schema compatibility and success-event RED contract tests (mixed CSV versions, JSON version mismatch, unknown future version, unknown-field warning, valid-import event) in `tests/contract/test_metadata_schema_contract.py`.
@@ -146,14 +146,14 @@
 
 ### Implementation for User Story 4
 
-- [ ] T058 [US4] Implement approved adapter interfaces with pinned API inventory in `src/cvcutter/infrastructure/integrations/adapters.py`.
+- [ ] T058 [US4] Implement approved adapter interfaces with pinned API inventory and Google Forms response fetch operation in `src/cvcutter/infrastructure/integrations/adapters.py`.
 - [ ] T059 [US4] Implement integration compatibility preflight service in `src/cvcutter/application/services/integration_compatibility_service.py`.
 - [ ] T060 [US4] Implement idempotent publishing executor with retry telemetry in `src/cvcutter/application/services/publishing_service.py`.
 - [ ] T061 [US4] Implement destination allowlist policy gate in `src/cvcutter/domain/policies/destination_policy.py`.
 - [ ] T062 [US4] Implement metadata import normalizer/validator with explicit edge-case handling, version mapping, and metadata-validation success-event emission in `src/cvcutter/application/services/metadata_import_service.py`.
 - [ ] T063 [US4] Implement segment-to-metadata mapping enforcement in `src/cvcutter/application/services/metadata_mapping_service.py`.
 - [ ] T064 [US4] Implement export pipeline with format-matrix validation and opening-title rendering in `src/cvcutter/infrastructure/media/export_pipeline.py`.
-- [ ] T065 [US4] Implement credential risk-warning and consent UI flow in `src/cvcutter/presentation/flet_app/views/credential_risk_dialog.py`.
+- [ ] T065 [US4] Implement plaintext credential config write/read and consent-gated enablement flow in `src/cvcutter/infrastructure/persistence/plaintext_credential_repository.py`.
 
 **Checkpoint**: US4 independently supports policy-safe automated publishing.
 
@@ -194,8 +194,8 @@
 - [ ] T078 Implement cleanup action controller and protected-ledger rejection messaging in `src/cvcutter/presentation/flet_app/controllers/cleanup_controller.py`.
 - [ ] T079 Implement keyboard navigation, focus indicators, and contrast-safe theme behavior in `src/cvcutter/presentation/flet_app/views/accessibility_view.py`.
 - [ ] T080 Produce FR traceability matrix in `specs/002-refactor-concert-tool/checklists/traceability-matrix.md`.
-- [ ] T081 Add FR-046 compliance-scope guard tests in `tests/integration/governance/test_compliance_scope_guard.py`.
-- [ ] T082 Implement compliance-scope verification service in `src/cvcutter/application/services/compliance_scope_service.py`.
+- [ ] T081 Add FR-046/FR-047 compliance-scope guard tests in `tests/integration/governance/test_compliance_scope_guard.py`.
+- [ ] T082 Implement FR-046/FR-047 compliance-scope verification service in `src/cvcutter/application/services/compliance_scope_service.py`.
 - [ ] T083 Run `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` and record outputs in `specs/002-refactor-concert-tool/checklists/quality-gates.md`.
 - [ ] T084 Define SC-001..SC-010 measurement protocol and capture templates in `specs/002-refactor-concert-tool/checklists/success-criteria-protocol.md`.
 - [ ] T085 Execute SC-001..SC-010 runs plus quickstart/gui-independent validations and publish report in `specs/002-refactor-concert-tool/checklists/success-criteria-report.md`.
@@ -210,7 +210,7 @@
 - [ ] T094 [P] Add recoverability-label and next-action error contract tests in `tests/integration/presentation/test_error_recoverability_labels.py`.
 - [ ] T095 Implement unified error-guidance mapper for recoverable vs blocking failures in `src/cvcutter/application/services/error_guidance_service.py`.
 - [ ] T096 [P] Add credential consent/source audit-record tests in `tests/integration/integrations/test_credential_consent_audit.py`.
-- [ ] T097 Implement plaintext credential config write/read with consent/source audit persistence in `src/cvcutter/infrastructure/persistence/plaintext_credential_repository.py`.
+- [ ] T097 Implement credential source and consent audit event persistence hardening in `src/cvcutter/infrastructure/observability/credential_audit_events.py`.
 - [ ] T098 [P] Add publish.dedup_blocked event contract tests in `tests/contract/test_publish_dedup_blocked_event.py`.
 - [ ] T099 Implement `publish.dedup_blocked` event emission in `src/cvcutter/application/services/publishing_service.py`.
 
@@ -295,7 +295,7 @@ T044 tests/integration/presentation/test_tuning_mode_switching.py
 # Parallel implementation in separate modules
 T046 src/cvcutter/domain/segmentation/boundary_aggregator.py
 T049 src/cvcutter/domain/synchronization/alignment_quality_policy.py
-T050 src/cvcutter/presentation/flet_app/views/audio_tuning_view.py
+T050 src/cvcutter/presentation/flet_app/views/segment_review_view.py
 ```
 
 ## Parallel Example: User Story 4
