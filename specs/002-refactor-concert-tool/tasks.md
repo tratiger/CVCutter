@@ -214,10 +214,10 @@
 - [X] T098 [P] Add publish.dedup_blocked event contract tests in `tests/contract/test_publish_dedup_blocked_event.py`.
 - [X] T099 Implement `publish.dedup_blocked` event emission in `src/cvcutter/application/services/publishing_service.py`.
 - [X] T100 Run final `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` and refresh evidence in `specs/002-refactor-concert-tool/checklists/quality-gates.md`.
-- [X] T101 Execute final SC-001..SC-010 runs plus quickstart/gui-independent validations and publish report in `specs/002-refactor-concert-tool/checklists/success-criteria-report.md`.
-- [X] T102 Update `Manual Test Protocol` with post-execution observed results and pass/fail date in `specs/002-refactor-concert-tool/plan.md`.
+- [ ] T101 Execute final SC-001..SC-010 runs plus quickstart/gui-independent validations and publish report in `specs/002-refactor-concert-tool/checklists/success-criteria-report.md`.
+- [ ] T102 Update `Manual Test Protocol` with post-execution observed results and pass/fail date in `specs/002-refactor-concert-tool/plan.md`.
 - [X] T103 Decommission legacy `customtkinter` entry paths and add migration-completion verification in `src/cvcutter/presentation/legacy_customtkinter_retirement.py`.
-- [X] T104 Produce or fetch CI/release packaged artifact and record provenance for quickstart Section 5 in `specs/002-refactor-concert-tool/checklists/release-artifact.md`.
+- [ ] T104 Produce or fetch CI/release packaged artifact and record provenance for quickstart Section 5 in `specs/002-refactor-concert-tool/checklists/release-artifact.md`.
 
 ---
 
