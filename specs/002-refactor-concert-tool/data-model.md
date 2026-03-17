@@ -146,7 +146,7 @@ ProcessingJob (1) ──< OperatorRolePolicy
   - `stage_name: str|null`
   - `attempt: int|null`
   - `severity: enum[info, warning, error]`
-  - `payload_json: object`
+  - `payload: object`
   - `occurred_at: datetime`
   - `is_minimal_audit: bool`
 - **Validation Rules**:

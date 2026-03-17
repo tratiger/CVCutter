@@ -94,7 +94,7 @@ As an operator with mixed technical skill, I can configure jobs through a guided
 
 ### User Story 3 - Accurate Segmenting and Audio Alignment (Priority: P3)
 
-As an editor, I receive automatically proposed performance segment boundaries and synchronized audio outputs that are measured against SC-003 and SC-008 quality targets, with operator adjustments when confidence is low.
+As an operator (editor context), I receive automatically proposed performance segment boundaries and synchronized audio outputs that are measured against SC-003 and SC-008 quality targets, with operator adjustments when confidence is low.
 
 **Why this priority**: Output quality determines whether the automation is trusted for production use.
 
@@ -116,7 +116,7 @@ As an editor, I receive automatically proposed performance segment boundaries an
 
 ### User Story 4 - Stable Automated Publishing (Priority: P4)
 
-As a publisher, I can automatically produce publish-ready media assets and send them to approved external destinations with retry/recovery behavior that conforms to FR-017 and SC-005.
+As an operator (publisher context), I can automatically produce publish-ready media assets and send them to approved external destinations with retry/recovery behavior that conforms to FR-017 and SC-005.
 
 **Why this priority**: Publishing automation is valuable after core processing is reliable and visible.
 
@@ -195,7 +195,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-021**: The system MUST detect configuration changes made after checkpoint creation and apply a defined configuration-to-stage dependency map to require explicit checkpoint invalidation or cancellation before resume.
 - **FR-022**: The system MUST allow operators to configure the low-confidence boundary-detection threshold per job on a 0-100 scale, with a default threshold of 70.
 - **FR-023**: The system MUST continue processing when optional hardware acceleration is unavailable by using a CPU-compatible execution path.
-- **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step.
+- **FR-024**: The system MUST emit structured run events for start, completion, and failure of each core processing step, using `contracts/processing-events-contract.md` as the normative taxonomy/payload source.
 - **FR-025**: The system MUST evaluate per-output synchronization quality against an 80 ms median alignment tolerance and MUST flag outputs that exceed tolerance for manual timing correction.
 - **FR-026**: The system MUST provide a fallback action when the selected classification strategy yields no confident match, including operator guidance to switch strategy and adjust matching inputs.
 - **FR-027**: The system MUST validate installer/runtime environment compatibility and block installation and startup on unsupported workstation environments, with explicit support for Windows desktop (10/11, 64-bit) and macOS 13+ desktop environments (Apple Silicon and Intel).
@@ -223,7 +223,7 @@ As a non-engineering user, I can install the packaged application on a supported
 - **FR-048**: The system MUST apply an exclusive edit lock for each job draft and block concurrent edit attempts from other app instances with user-facing lock guidance.
 - **FR-049**: The system MUST require `schema_version` in imported metadata payloads, apply explicit compatibility mapping for older versions, and support at least the immediately previous metadata schema version.
 - **FR-050**: The system MUST use a single executable authorization role (`operator`) for workflows in this feature, while allowing `editor` and `publisher` labels as scenario-context descriptors only.
-- **FR-051**: The system MUST retain a non-deletable minimal immutable audit ledger as a protected subset of FR-018, containing job identifier, job creation event, stage transitions, retry outcomes, terminal completion outcome, and timestamps.
+- **FR-051**: The system MUST retain a non-deletable minimal immutable audit ledger as a protected subset of FR-018, containing job identifier, job creation event, stage transitions, retry outcomes, terminal outcomes (`completed`, `failed`, `canceled`), and timestamps.
 
 ### Non-Functional Requirements
 
@@ -324,6 +324,10 @@ As a non-engineering user, I can install the packaged application on a supported
 - **Audio Source Profile**: Per-source alignment offset, level preference, noise reduction preference, and validation result.
 - **Metadata Mapping Record**: The association between finalized segments and human-readable metadata used for export/publishing.
 - **Publishing Task**: A tracked outbound delivery action with destination, status lifecycle, retry history, and deduplication token, uniquely keyed by (`job_id`, `segment_id`, `destination`).
+- **Job Event Ledger**: Append-only structured event record store for stage/retry/storage/cleanup observability and immutable minimal audit retention.
+- **Job Draft Lock**: Cross-process lock state for exclusive draft editing and stale/release recovery handling.
+- **Configuration Change Record**: Persisted decision record for post-checkpoint configuration mutations and invalidate-or-cancel resume gating.
+- **Operator Role Policy**: Persisted normalization rule ensuring executable workflows run as `operator` while `editor`/`publisher` remain context labels.
 
 ## Assumptions
 

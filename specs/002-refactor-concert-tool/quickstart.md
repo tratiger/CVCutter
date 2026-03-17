@@ -34,7 +34,9 @@ uv run cvcutter
 1. Prepare packaged desktop artifact (installer/single executable) from CI/release build.
 2. On clean supported workstation, run installer without preinstalled Python/uv.
 3. Verify first launch succeeds without developer setup.
-4. On unsupported environment, verify installer blocks with supported-OS guidance.
+4. Verify packaged first-launch onboarding completes through first job draft creation without developer tools.
+5. On unsupported environment, verify installer blocks with supported-OS guidance.
+6. On unsupported environment, verify application startup is blocked with supported-OS guidance.
 
 ## 6. Core Workflow Validation (Target Behavior)
 
@@ -43,7 +45,7 @@ uv run cvcutter
 3. Force interruption after at least one completed stage.
 4. Restart app and verify stale-state transition (`running -> paused -> resumable`) before resume.
 5. Resume from first incomplete stage and confirm no duplicate outputs.
-6. Execute publish with transient-failure injection and verify retry policy (`Retry-After` priority, backoff+jitter, 15-minute manual escalation).
+6. Execute publish with transient-failure injection and verify retry policy (`Retry-After` priority, backoff+jitter with `1s` initial and `60s` max delay, 15-minute manual escalation).
 7. Run multi-instance launch test and verify cross-process single-active-job and draft-lock enforcement.
 8. Verify storage threshold behavior: `<20 GB` warning, `<10 GB` new-start block, `<5 GB` safe pause + cleanup guidance, and explicit operator confirmation is required before resume/unblock after recovery.
 9. Verify metadata compatibility matrix:
@@ -69,6 +71,8 @@ uv run cvcutter
     - export/publish is blocked while low-confidence segment confirmations are pending
     - publish is blocked while sync outputs flagged for manual correction remain unresolved
 16. Verify CR-010 by executing core business-logic test suites in a GUI-free context (presentation layer dependency unavailable) and confirming all core tests pass.
+17. Verify FR-045 compatibility preflight blocks adapter-backed operations when pinned API versions are incompatible and presents remediation guidance.
+18. Measure synchronization-stage peak process RSS on validation-profile workloads and verify `<= 8 GB` pass/fail threshold.
 
 ## 7. Manual-Judgment Test Protocol (Constitution CR-003)
 

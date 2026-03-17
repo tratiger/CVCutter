@@ -41,6 +41,7 @@ The implementation uses explicit bounded contexts (presentation, application, do
 - [x] **Test-First Delivery**: `quickstart.md` defines quality gate commands and manual-judgment protocol requirements aligned with constitutional Red-Green-Refactor workflow.
 - [x] **Resume & Retry Safety**: `data-model.md` checkpoint/dedup entities plus `contracts/processing-events-contract.md` and `contracts/external-integration-contract.md` define resumable and idempotent retry semantics.
 - [x] **Approved Integrations**: `contracts/external-integration-contract.md` limits integrations to approved providers and blocks non-approved destinations.
+- [x] **Contract Coverage**: `contracts/*.md` (metadata-schema, processing-events, external-integration, authorization-role, storage-safety, classification-decision, packaging-install, cleanup-retention) are reflected in the design/task scope.
 - [x] **Quality Gates**: `quickstart.md` explicitly captures `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov`.
 - [x] **GUI-Independent Core Tests (CR-010)**: `tasks.md` includes GUI-independent core-test gate tasks and `quickstart.md` includes explicit validation for GUI-free business-logic test execution.
 
@@ -71,10 +72,13 @@ The implementation uses explicit bounded contexts (presentation, application, do
 
 ```text
 specs/002-refactor-concert-tool/
+├── spec.md
 ├── plan.md
 ├── research.md
 ├── data-model.md
 ├── quickstart.md
+├── checklists/
+│   └── *.md              # Validation evidence artifacts
 ├── contracts/
 │   ├── metadata-schema-contract.md
 │   ├── processing-events-contract.md
@@ -90,6 +94,7 @@ specs/002-refactor-concert-tool/
 ### Source Code (repository root)
 
 ```text
+build_exe.py
 src/cvcutter/
 ├── app.py
 ├── presentation/
@@ -114,6 +119,7 @@ src/cvcutter/
 │   ├── persistence/
 │   ├── media/
 │   ├── integrations/
+│   ├── packaging/
 │   └── observability/
 └── shared/
     ├── config/
