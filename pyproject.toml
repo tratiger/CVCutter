@@ -1,24 +1,10 @@
 [project]
 name = "cvcutter"
-version = "0.1.0"
+version = "0.2.0"
 description = "Concert Video Cutter & Uploader"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "moviepy>=1.0.3",
-    "pydub>=0.25.1",
-    "tqdm>=4.67.1",
-    "opencv-python>=4.10.0.84",
-    "librosa>=0.10.2.post1",
-    "scipy>=1.14.1",
-    "google-auth-oauthlib>=1.2.1",
-    "google-auth-httplib2>=0.2.0",
-    "google-api-python-client>=2.155.0",
-    "customtkinter>=5.2.2",
-    "pillow>=11.0.0",
-    "pyinstaller>=6.11.1",
-    "google-generativeai>=0.3.0",
-]
+dependencies = []
 
 [dependency-groups]
 dev = [
@@ -37,3 +23,16 @@ packages = ["src/cvcutter"]
 
 [project.scripts]
 cvcutter = "cvcutter.app:main"
+
+[tool.ruff]
+line-length = 100
+exclude = ["test-temp", "test-output"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "basic"
+venvPath = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

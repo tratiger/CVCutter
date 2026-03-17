@@ -216,3 +216,14 @@ yolov8n.pt
 00002.MTS
 temp/
 reference/
+
+# Universal workspace noise
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+
+# Python virtualenv explicit dirs
+.venv/

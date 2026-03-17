@@ -1,5 +1,4 @@
 import sys
-import os
 from pathlib import Path
 
 # exe内部または実行環境のパスを調整
@@ -16,4 +15,4 @@ sys.path.insert(0, str(base_path))
 from cvcutter.app import main
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
