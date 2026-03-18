@@ -214,10 +214,38 @@
 - [X] T098 [P] Add publish.dedup_blocked event contract tests in `tests/contract/test_publish_dedup_blocked_event.py`.
 - [X] T099 Implement `publish.dedup_blocked` event emission in `src/cvcutter/application/services/publishing_service.py`.
 - [X] T100 Run final `uv run ruff check .`, `uv run pyright`, and `uv run pytest --cov` and refresh evidence in `specs/002-refactor-concert-tool/checklists/quality-gates.md`.
-- [ ] T101 Execute final SC-001..SC-010 runs plus quickstart/gui-independent validations and publish report in `specs/002-refactor-concert-tool/checklists/success-criteria-report.md`.
-- [ ] T102 Update `Manual Test Protocol` with post-execution observed results and pass/fail date in `specs/002-refactor-concert-tool/plan.md`.
+- [ ] T101 Execute final SC-001..SC-010 runs plus quickstart/gui-independent validations and publish report in `specs/002-refactor-concert-tool/checklists/success-criteria-report.md`. *(Blocked: requires participant/manual field-study execution for SC thresholds.)*
+- [ ] T102 Update `Manual Test Protocol` with post-execution observed results and pass/fail date in `specs/002-refactor-concert-tool/plan.md`. *(Blocked: awaiting manual protocol completion and approver sign-off.)*
 - [X] T103 Decommission legacy `customtkinter` entry paths and add migration-completion verification in `src/cvcutter/presentation/legacy_customtkinter_retirement.py`.
-- [ ] T104 Produce or fetch CI/release packaged artifact and record provenance for quickstart Section 5 in `specs/002-refactor-concert-tool/checklists/release-artifact.md`.
+- [X] T104 Produce or fetch CI/release packaged artifact and record provenance for quickstart Section 5 in `specs/002-refactor-concert-tool/checklists/release-artifact.md`.
+
+---
+
+## Phase 9: Remediation Hardening (Post-Audit)
+
+**Purpose**: Replace hollow implementations discovered by full-code audit with contract-compliant behavior and strict tests.
+
+- [X] T105 [P] Add strict metadata schema RED tests (canonical fields, required fields, previous/current version acceptance, future-version rejection, mixed-version rejection) in `tests/contract/test_metadata_schema_contract.py`.
+- [X] T106 Implement full metadata normalization/validation contract in `src/cvcutter/application/services/metadata_import_service.py`.
+- [X] T107 [P] Add strict processing-event envelope RED tests (`event_id`, `event_schema_version`, `occurred_at`, `severity`, `stage_name`, `attempt`, `job_id` rules) in `tests/contract/test_processing_event_contract.py`.
+- [X] T108 Implement contract-compliant processing event envelope and stage/retry event emission in `src/cvcutter/application/dto/events.py` and `src/cvcutter/application/workflows/processing_workflow.py`.
+- [X] T109 [P] Add strict adapter contract RED tests for `AdapterResult` required fields (`provider`, `category`, `terminal`, `idempotency_outcome`, `recommended_next_action`) in `tests/contract/test_external_integration_adapter_contract.py`.
+- [X] T110 Implement structured adapter result mapping and approved provider behavior in `src/cvcutter/infrastructure/integrations/adapters.py`.
+- [X] T111 [P] Add platform compatibility RED tests for Windows version/arch and macOS version/arch boundaries in `tests/integration/packaging/test_installer_os_compatibility.py`.
+- [X] T112 Implement version/architecture-aware platform compatibility checks in `src/cvcutter/infrastructure/packaging/platform_compatibility.py`.
+- [X] T113 [P] Add strict timestamp strategy RED tests (ISO8601+timezone parse, event-window derivation, ±10-minute bound checks) in `tests/unit/domain/classification/test_timestamp_strategy_validity.py`.
+- [X] T114 Implement full timestamp validation rules with blocking reason codes in `src/cvcutter/domain/classification/timestamp_validator.py`.
+- [X] T115 [P] Add confidence policy RED tests for `no_confident_match` and `blocked_invalid_metadata` state outputs in `tests/unit/domain/classification/test_content_matching_guidance.py`.
+- [X] T116 Implement contract-aligned confidence-state and reason-code behavior in `src/cvcutter/domain/classification/confidence_policy.py`.
+- [X] T117 [P] Add config dependency map RED matrix tests for normative field groups in `tests/integration/workflows/test_resume_safety_guards.py`.
+- [X] T118 Implement full normative config dependency map and stage impact rules in `src/cvcutter/domain/checkpoints/config_dependency_map.py`.
+- [X] T119 [P] Add workflow-stage taxonomy RED tests requiring canonical stages (`classify`, `segment_detect`, `map_metadata`, `export`) in `tests/unit/domain/jobs/test_processing_job_lifecycle.py`.
+- [X] T120 Implement canonical stage/state transition model in `src/cvcutter/domain/jobs/stages.py` and `src/cvcutter/domain/jobs/processing_job.py`.
+- [X] T121 [P] Add controller/presentation wiring RED tests for cleanup output contracts and onboarding progression path in `tests/integration/presentation/test_first_launch_onboarding.py`.
+- [X] T122 Implement real controller/viewmodel wiring to service outcomes in `src/cvcutter/presentation/controllers/cleanup_controller.py`, `src/cvcutter/presentation/flet_app/viewmodels/*.py`, and `src/cvcutter/presentation/flet_app/views/*.py`.
+- [X] T123 Run full `uv run ruff check .`, `uv run pyright`, `uv run pytest --cov` and refresh `specs/002-refactor-concert-tool/checklists/quality-gates.md`.
+
+**Checkpoint**: Hollow implementations identified by audit are replaced by contract-driven logic with strict regression coverage.
 
 ---
 
@@ -233,6 +261,7 @@
 - **Phase 6 (US4)**: Depends on US1 + US2 + US3 outputs.
 - **Phase 7 (US5)**: Depends on Phase 2 plus runtime prerequisites delivered in US2 (`T039`) and US3 (`T045`).
 - **Phase 8 (Polish)**: Depends on all selected user stories.
+- **Phase 9 (Remediation Hardening)**: Depends on completed audit findings and may reopen prior story modules; blocks final release readiness.
 
 ### User Story Dependencies
 

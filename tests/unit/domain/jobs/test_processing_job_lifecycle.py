@@ -6,6 +6,15 @@ from cvcutter.domain.jobs.stages import JobState
 
 def test_processing_job_lifecycle_transitions() -> None:
     job = ProcessingJob("j1")
+    assert [stage.value for stage in job.stages] == [
+        "ingest",
+        "classify",
+        "segment_detect",
+        "sync",
+        "map_metadata",
+        "export",
+        "publish",
+    ]
     job.start()
     assert job.state == JobState.RUNNING
     while job.state == JobState.RUNNING:

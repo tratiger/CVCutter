@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 APPROVED_DESTINATIONS = {"youtube"}
-APPROVED_PROVIDERS = {"google_forms", "gemini", "youtube"}
+APPROVED_PROVIDERS = {"google_forms", "configured_ai", "gemini", "youtube"}
 
 
 def ensure_destination_allowed(provider: str, destination: str) -> None:

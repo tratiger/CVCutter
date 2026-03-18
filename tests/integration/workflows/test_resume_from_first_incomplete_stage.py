@@ -5,8 +5,8 @@ from cvcutter.domain.jobs.stages import WorkflowStage
 
 
 def test_resume_from_first_incomplete_stage() -> None:
-    completed = [WorkflowStage.INGEST, WorkflowStage.SEGMENT]
-    assert select_first_incomplete_stage(completed) == WorkflowStage.SYNC
+    completed = [WorkflowStage.INGEST, WorkflowStage.CLASSIFY]
+    assert select_first_incomplete_stage(completed) == WorkflowStage.SEGMENT_DETECT
 
 
 def test_workflow_events_are_isolated_per_run() -> None:

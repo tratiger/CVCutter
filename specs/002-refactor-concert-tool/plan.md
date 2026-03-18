@@ -64,7 +64,13 @@ The implementation uses explicit bounded contexts (presentation, application, do
   - Segment acceptance rate meets SC-003 threshold
   - Sync quality meets SC-008 threshold or flagged outputs have manual-correction rationale
   - Resume/retry traceability is present for reviewed runs
-- **Post-Execution Results**: Pending (to be appended after execution with pass/fail date)
+- **Post-Execution Results (2026-03-18)**:
+  - Automated evidence run completed:
+    - `uv run ruff check .` / `uv run pyright` / `uv run pytest --cov -q` all passed.
+    - Packaging build `uv run python build_exe.py` succeeded and `dist/CVCutter.exe` was generated.
+  - Manual-judgment protocol status:
+    - Human-reviewed segmentation/synchronization/classification dataset runs are **not yet executed**.
+    - Final manual pass/fail date remains pending approver execution.
 
 ### Segmentation Manual Test Addendum (2026-03-17)
 
