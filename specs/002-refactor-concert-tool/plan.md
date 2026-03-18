@@ -66,6 +66,31 @@ The implementation uses explicit bounded contexts (presentation, application, do
   - Resume/retry traceability is present for reviewed runs
 - **Post-Execution Results**: Pending (to be appended after execution with pass/fail date)
 
+### Segmentation Manual Test Addendum (2026-03-17)
+
+- **Scope**: `src/cvcutter/infrastructure/media/segmentation_pipeline.py` (OpenCV MOG2-based implementation)  
+- **Related RED/GREEN Test**: `tests/unit/domain/segmentation/test_multimodal_disagreement_candidates.py`
+- **Manual Procedures (Segmentation-Focused)**:
+  1. Launch the app and create a draft from onboarding.
+  2. Run the segmentation stage on:
+     - synthetic transition sample (black/white frame-switch style),
+     - real validation clips from the segmentation validation set.
+  3. Capture proposed segment boundaries and confidence labels.
+  4. Compare boundaries against ground-truth annotations and record deviation.
+  5. For low-confidence candidates, perform operator confirmation flow and record accept/adjust/reject outcomes.
+- **Segmentation Acceptance Criteria**:
+  - Synthetic sample reproduces expected split count and boundary windows (two candidate regions for the prepared dummy transition stream).
+  - Real validation clips satisfy SC-003 threshold after required low-confidence confirmations.
+  - No duplicate candidate emission on re-run with identical inputs and settings.
+  - Peak RSS remains within FR-013 bound (`<= 8 GB`) during validation-profile segmentation runs.
+- **Execution Record Template**:
+  - Run date:
+  - Dataset IDs:
+  - Segment acceptance rate:
+  - Low-confidence reviewed count:
+  - Notable corrections:
+  - Pass/Fail decision:
+
 ## Project Structure
 
 ### Documentation (this feature)
