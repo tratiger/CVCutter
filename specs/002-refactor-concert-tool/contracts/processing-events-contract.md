@@ -71,7 +71,7 @@ Defines structured event records emitted for observability, audit, and resume/re
   "target_class": "deletable_artifact|protected_minimal_audit",
   "target_id": "artifact-or-record-id",
   "outcome": "performed|rejected",
-  "reason": "policy_protected|user_requested"
+  "reason": "policy_protected|delete_failed|user_requested"
 }
 ```
 

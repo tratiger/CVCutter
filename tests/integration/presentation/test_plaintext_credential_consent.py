@@ -2,5 +2,11 @@ from cvcutter.presentation.flet_app.viewmodels.publish_workflow_viewmodel import
 
 
 def test_plaintext_credential_consent_gate() -> None:
-    assert not PublishWorkflowViewModel(consent_given=False).can_save_plaintext_credentials()
-    assert PublishWorkflowViewModel(consent_given=True).can_save_plaintext_credentials()
+    vm = PublishWorkflowViewModel(consent_given=False)
+    assert not vm.can_save_plaintext_credentials()
+    assert not vm.save_plaintext_credentials({"token": "x"})
+
+    vm.consent_given = True
+    assert vm.can_save_plaintext_credentials()
+    assert vm.save_plaintext_credentials({"token": "x"})
+    assert vm.load_plaintext_credentials()["token"] == "x"

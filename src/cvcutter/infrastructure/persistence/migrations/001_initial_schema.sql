@@ -5,11 +5,13 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE TABLE IF NOT EXISTS checkpoints (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    checkpoint_id TEXT PRIMARY KEY,
     job_id TEXT NOT NULL,
-    stage TEXT NOT NULL,
+    stage_name TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
     status TEXT NOT NULL,
-    UNIQUE(job_id, stage)
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(job_id, stage_name, attempt)
 );
 
 CREATE TABLE IF NOT EXISTS config_change_records (
@@ -35,4 +37,48 @@ CREATE TABLE IF NOT EXISTS events (
     event_type TEXT NOT NULL,
     job_id TEXT,
     payload TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS segments (
+    segment_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    confidence_score INTEGER NOT NULL,
+    review_status TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audio_source_profiles (
+    audio_profile_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    offset_ms INTEGER NOT NULL,
+    quality_status TEXT NOT NULL,
+    correction_resolution_status TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS metadata_mapping (
+    mapping_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    segment_id TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    publish_visibility TEXT NOT NULL,
+    validation_status TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS role_policy (
+    policy_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    executable_role TEXT NOT NULL,
+    context_labels TEXT NOT NULL,
+    recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS classification_strategies (
+    job_id TEXT PRIMARY KEY,
+    strategy TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

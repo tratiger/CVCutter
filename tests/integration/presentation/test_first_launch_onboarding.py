@@ -12,6 +12,31 @@ def test_onboarding_first_draft_flow() -> None:
     ]
 
 
+def test_onboarding_runtime_uses_flet_app(monkeypatch) -> None:
+    observed = {"called": False}
+
+    def _fake_app(target) -> None:
+        observed["called"] = True
+
+        class _DummyPage:
+            title: str = ""
+            window_width: int = 0
+            window_height: int = 0
+
+            def add(self, *args, **kwargs) -> None:
+                return None
+
+            def update(self) -> None:
+                return None
+
+        target(_DummyPage())
+
+    monkeypatch.setattr("cvcutter.presentation.flet_app.views.onboarding_view.ft.app", _fake_app)
+    result = OnboardingView().run(force_headless=False)
+    assert observed["called"]
+    assert result == "create_first_draft"
+
+
 def test_cleanup_controller_returns_structured_contract_payload() -> None:
     controller = CleanupController()
     performed = controller.request_cleanup("scratch:file-1")

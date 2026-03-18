@@ -1,5 +1,9 @@
 from cvcutter.application.services.config_change_guard_service import ConfigChangeGuardService
-from cvcutter.application.services.startup_recovery_service import can_start_new_job, detect_stale_state
+from cvcutter.application.services.startup_recovery_service import (
+    can_start_new_job,
+    detect_stale_state,
+    recover_startup_state,
+)
 
 
 def test_startup_stale_state_detection() -> None:
@@ -15,3 +19,13 @@ def test_resume_gate_after_config_change() -> None:
     assert guard.assess({"output_prefs.title_overlay"}, "sync") == "continue"
     assert guard.assess({"output_prefs.title_overlay"}, "map") == "continue"
     assert guard.assess({"unknown.runtime.flag"}, "publish") == "continue"
+
+
+def test_stale_running_state_recovers_via_paused_then_resumable() -> None:
+    result = recover_startup_state(
+        current_state="running",
+        last_heartbeat_seconds=600,
+        worker_alive=False,
+    )
+    assert result["state"] == "resumable"
+    assert result["transitions"] == ["paused", "resumable"]

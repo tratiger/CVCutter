@@ -1,7 +1,7 @@
 import pytest
 
 from cvcutter.domain.jobs.processing_job import ProcessingJob
-from cvcutter.domain.jobs.stages import JobState
+from cvcutter.domain.jobs.stages import JobState, WorkflowStage
 
 
 def test_processing_job_lifecycle_transitions() -> None:
@@ -35,3 +35,26 @@ def test_completed_job_cannot_restart() -> None:
         job.complete_current_stage()
     with pytest.raises(RuntimeError):
         job.start()
+
+
+def test_completed_job_cannot_fail_or_cancel() -> None:
+    job = ProcessingJob("j4")
+    job.start()
+    while job.state == JobState.RUNNING:
+        job.complete_current_stage()
+    with pytest.raises(RuntimeError):
+        job.fail()
+    with pytest.raises(RuntimeError):
+        job.cancel()
+
+
+def test_running_job_can_cancel() -> None:
+    job = ProcessingJob("j5")
+    job.start()
+    job.cancel()
+    assert job.state == JobState.CANCELED
+
+
+def test_workflow_stage_enum_uses_only_canonical_members() -> None:
+    assert not hasattr(WorkflowStage, "SEGMENT")
+    assert not hasattr(WorkflowStage, "MAP")

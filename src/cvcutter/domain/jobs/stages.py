@@ -11,8 +11,6 @@ class WorkflowStage(str, Enum):
     MAP_METADATA = "map_metadata"
     EXPORT = "export"
     PUBLISH = "publish"
-    SEGMENT = "segment_detect"
-    MAP = "map_metadata"
 
 
 LEGACY_STAGE_VALUE_ALIASES: dict[str, str] = {

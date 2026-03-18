@@ -46,4 +46,11 @@ class ProcessingJob:
         self.state = JobState.RESUMABLE
 
     def fail(self) -> None:
+        if self.state not in {JobState.RUNNING, JobState.PAUSED, JobState.RESUMABLE}:
+            raise RuntimeError(f"cannot fail job from state {self.state.value}")
         self.state = JobState.FAILED
+
+    def cancel(self) -> None:
+        if self.state not in {JobState.RUNNING, JobState.PAUSED, JobState.RESUMABLE}:
+            raise RuntimeError(f"cannot cancel job from state {self.state.value}")
+        self.state = JobState.CANCELED

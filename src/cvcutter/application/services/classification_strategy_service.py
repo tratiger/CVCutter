@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 
+from cvcutter.infrastructure.persistence.repositories import SqliteRepositories
+
+_ALLOWED_STRATEGIES = {"content_based", "timestamp_based"}
+
+
+@dataclass(slots=True)
 class ClassificationStrategyService:
-    def __init__(self) -> None:
-        self._strategies: dict[str, str] = {}
+    repositories: SqliteRepositories
 
     def set_strategy(self, job_id: str, strategy: str) -> None:
-        self._strategies[job_id] = strategy
+        if strategy not in _ALLOWED_STRATEGIES:
+            raise ValueError("unsupported_classification_strategy")
+        self.repositories.save_classification_strategy(job_id, strategy)
 
     def get_strategy(self, job_id: str) -> str:
-        return self._strategies.get(job_id, "name+program")
+        stored = self.repositories.load_classification_strategy(job_id)
+        return "content_based" if stored is None else stored

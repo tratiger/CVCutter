@@ -5,6 +5,7 @@ description = "Concert Video Cutter & Uploader"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "flet>=0.28.3",
     "numpy>=2.4.3",
     "opencv-python-headless>=4.13.0.92",
 ]

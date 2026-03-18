@@ -4,3 +4,7 @@ from cvcutter.presentation.flet_app.views.accessibility_view import accessibilit
 def test_accessibility_flags_enabled() -> None:
     profile = accessibility_profile()
     assert profile["keyboard_navigation"] and profile["focus_visible"] and profile["contrast_safe"]
+    assert profile["theme"] == "contrast_safe"
+    shortcuts = profile["shortcuts"]
+    assert isinstance(shortcuts, list)
+    assert "ctrl+enter" in shortcuts
