@@ -7,9 +7,11 @@ from cvcutter.infrastructure.persistence.repositories import SqliteRepositories
 
 
 def test_publish_key_uniqueness(sqlite_repo) -> None:
-    sqlite_repo.store_publish_key("k1", "job")
+    sqlite_repo.store_publish_key("job-a", "segment-1", "youtube")
     with pytest.raises(sqlite3.IntegrityError):
-        sqlite_repo.store_publish_key("k1", "job")
+        sqlite_repo.store_publish_key("job-a", "segment-1", "youtube")
+    sqlite_repo.store_publish_key("job-b", "segment-1", "youtube")
+    sqlite_repo.store_publish_key("job-a", "segment-1", "youtube-alt")
 
 
 def test_active_job_lock_uniqueness(sqlite_repo) -> None:
@@ -77,3 +79,29 @@ def test_checkpoint_legacy_schema_is_migrated(tmp_path: Path) -> None:
         ("ingest", 2, "failed"),
         ("ingest", 3, "completed"),
     ]
+
+
+def test_publish_key_legacy_schema_is_migrated(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-publish.db"
+    legacy_conn = sqlite3.connect(db_path)
+    try:
+        legacy_conn.executescript(
+            """
+            CREATE TABLE publish_keys (
+                key TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL
+            );
+            INSERT INTO publish_keys(key, job_id)
+            VALUES ('segment-legacy', 'job-legacy');
+            """
+        )
+        legacy_conn.commit()
+    finally:
+        legacy_conn.close()
+
+    repo = SqliteRepositories(db_path)
+    repo.init_schema()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.store_publish_key("job-legacy", "segment-legacy", "youtube")
+    repo.store_publish_key("job-another", "segment-legacy", "youtube")

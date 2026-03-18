@@ -22,8 +22,10 @@ CREATE TABLE IF NOT EXISTS config_change_records (
 );
 
 CREATE TABLE IF NOT EXISTS publish_keys (
-    key TEXT PRIMARY KEY,
-    job_id TEXT NOT NULL
+    job_id TEXT NOT NULL,
+    segment_id TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    PRIMARY KEY(job_id, segment_id, destination)
 );
 
 CREATE TABLE IF NOT EXISTS locks (

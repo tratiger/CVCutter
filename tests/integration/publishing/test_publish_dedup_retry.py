@@ -10,9 +10,10 @@ def test_publish_dedup_blocked_event(tmp_path: Path) -> None:
     second_repo = SqliteRepositories(db_path)
     first_repo.init_schema()
     second_repo.init_schema()
-    first_service = PublishingService(first_repo, job_id="job")
-    second_service = PublishingService(second_repo, job_id="job")
-    first = first_service.publish("k")
-    second = second_service.publish("k")
+    job_id = "11111111-1111-1111-1111-111111111141"
+    first_service = PublishingService(first_repo, job_id=job_id)
+    second_service = PublishingService(second_repo, job_id=job_id)
+    first = first_service.publish("segment-1", "youtube")
+    second = second_service.publish("segment-1", "youtube")
     assert first.status == "published"
     assert second.event_type == "publish.dedup_blocked"

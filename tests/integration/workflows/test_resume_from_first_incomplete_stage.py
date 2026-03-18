@@ -11,8 +11,10 @@ def test_resume_from_first_incomplete_stage() -> None:
 
 def test_workflow_events_are_isolated_per_run() -> None:
     workflow = ProcessingWorkflow()
-    first_events = workflow.run_until_complete(ProcessingJob("job-1"))
-    second_events = workflow.run_until_complete(ProcessingJob("job-2"))
+    first_id = "11111111-1111-1111-1111-111111111121"
+    second_id = "11111111-1111-1111-1111-111111111122"
+    first_events = workflow.run_until_complete(ProcessingJob(first_id))
+    second_events = workflow.run_until_complete(ProcessingJob(second_id))
     assert first_events is not second_events
-    assert all(event.job_id == "job-1" for event in first_events)
-    assert all(event.job_id == "job-2" for event in second_events)
+    assert all(event.job_id == first_id for event in first_events)
+    assert all(event.job_id == second_id for event in second_events)

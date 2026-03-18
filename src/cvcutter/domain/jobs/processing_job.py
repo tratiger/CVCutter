@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import UUID
 
 from cvcutter.domain.jobs.stages import JobState, WorkflowStage
 from cvcutter.domain.policies.authorization_policy import enforce_executable_role
@@ -13,6 +14,23 @@ class ProcessingJob:
     stage_index: int = 0
     state: JobState = JobState.DRAFT
     completed_stages: list[WorkflowStage] = field(default_factory=list)
+    _job_id_locked: bool = field(init=False, default=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._validate_job_id(self.job_id)
+        object.__setattr__(self, "_job_id_locked", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name == "job_id" and getattr(self, "_job_id_locked", False):
+            raise AttributeError("job_id is immutable")
+        object.__setattr__(self, name, value)
+
+    @staticmethod
+    def _validate_job_id(job_id: str) -> None:
+        try:
+            UUID(job_id)
+        except ValueError as error:
+            raise ValueError("job_id must be a valid UUID") from error
 
     @property
     def stages(self) -> list[WorkflowStage]:
@@ -20,7 +38,9 @@ class ProcessingJob:
 
     def start(self) -> None:
         enforce_executable_role(self.role)
-        if self.state not in {JobState.DRAFT, JobState.PAUSED, JobState.RESUMABLE, JobState.READY}:
+        if self.state == JobState.PAUSED:
+            raise RuntimeError("cannot start job from state paused; mark job resumable first")
+        if self.state not in {JobState.DRAFT, JobState.RESUMABLE, JobState.READY}:
             raise RuntimeError(f"cannot start job from state {self.state.value}")
         self.state = JobState.RUNNING
 

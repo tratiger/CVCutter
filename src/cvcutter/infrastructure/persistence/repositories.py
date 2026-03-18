@@ -8,6 +8,7 @@ from uuid import uuid4
 
 
 REQUIRED_CHECKPOINT_COLUMNS = {"checkpoint_id", "job_id", "stage_name", "attempt", "status"}
+REQUIRED_PUBLISH_KEY_COLUMNS = {"job_id", "segment_id", "destination"}
 
 
 @dataclass(slots=True)
@@ -47,6 +48,7 @@ class SqliteRepositories:
         try:
             conn.executescript(sql)
             self._migrate_legacy_checkpoints(conn)
+            self._migrate_legacy_publish_keys(conn)
             conn.commit()
         finally:
             conn.close()
@@ -103,6 +105,34 @@ class SqliteRepositories:
         )
         conn.execute("DROP TABLE checkpoints_legacy")
 
+    def _migrate_legacy_publish_keys(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute("PRAGMA table_info(publish_keys)").fetchall()
+        if not rows:
+            return
+
+        columns = {str(row[1]) for row in rows}
+        if REQUIRED_PUBLISH_KEY_COLUMNS.issubset(columns):
+            return
+        if not {"job_id", "key"}.issubset(columns):
+            raise RuntimeError("unsupported_publish_keys_schema")
+
+        conn.execute("ALTER TABLE publish_keys RENAME TO publish_keys_legacy")
+        conn.execute(
+            """
+            CREATE TABLE publish_keys (
+                job_id TEXT NOT NULL,
+                segment_id TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                PRIMARY KEY(job_id, segment_id, destination)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO publish_keys(job_id, segment_id, destination) "
+            "SELECT job_id, key, 'youtube' FROM publish_keys_legacy"
+        )
+        conn.execute("DROP TABLE publish_keys_legacy")
+
     def insert_job(self, job_id: str, state: str, role: str) -> None:
         self._execute_write(
             "INSERT INTO jobs(job_id, state, role) VALUES (?, ?, ?)",
@@ -146,10 +176,10 @@ class SqliteRepositories:
             return None
         return str(row[0])
 
-    def store_publish_key(self, key: str, job_id: str) -> None:
+    def store_publish_key(self, job_id: str, segment_id: str, destination: str) -> None:
         self._execute_write(
-            "INSERT INTO publish_keys(key, job_id) VALUES (?, ?)",
-            (key, job_id),
+            "INSERT INTO publish_keys(job_id, segment_id, destination) VALUES (?, ?, ?)",
+            (job_id, segment_id, destination),
         )
 
     def acquire_active_job_lock(self, job_id: str) -> bool:
