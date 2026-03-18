@@ -26,6 +26,7 @@ def _build_with_pyinstaller(output_dir: Path, app_name: str) -> Path | None:
         [
             "--noconfirm",
             "--onefile",
+            "--noupx",
             f"--name={app_name}",
             f"--distpath={output_dir}",
             str(entry_script),
