@@ -59,8 +59,9 @@ def test_checkpoint_legacy_schema_is_migrated(tmp_path: Path) -> None:
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
-            INSERT INTO checkpoints(id, job_id, stage, status)
-            VALUES ('legacy-1', 'job-legacy', 'ingest', 'completed');
+            INSERT INTO checkpoints(id, job_id, stage, status, created_at) VALUES
+                ('legacy-1', 'job-legacy', 'ingest', 'completed', '2024-01-01T00:00:00Z'),
+                ('legacy-2', 'job-legacy', 'ingest', 'failed', '2024-01-01T00:00:01Z');
             """
         )
         legacy_conn.commit()
@@ -69,9 +70,10 @@ def test_checkpoint_legacy_schema_is_migrated(tmp_path: Path) -> None:
 
     repo = SqliteRepositories(db_path)
     repo.init_schema()
-    repo.insert_checkpoint("job-legacy", "ingest", 2, "completed")
+    repo.insert_checkpoint("job-legacy", "ingest", 3, "completed")
 
     assert repo.list_checkpoints("job-legacy") == [
         ("ingest", 1, "completed"),
-        ("ingest", 2, "completed"),
+        ("ingest", 2, "failed"),
+        ("ingest", 3, "completed"),
     ]

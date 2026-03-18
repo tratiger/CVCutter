@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from cvcutter.presentation.controllers.cleanup_controller import CleanupController
 from cvcutter.presentation.flet_app.views.onboarding_view import OnboardingView
 
@@ -37,14 +39,17 @@ def test_onboarding_runtime_uses_flet_app(monkeypatch) -> None:
     assert result == "create_first_draft"
 
 
-def test_cleanup_controller_returns_structured_contract_payload() -> None:
-    controller = CleanupController()
-    performed = controller.request_cleanup("scratch:file-1")
+def test_cleanup_controller_returns_structured_contract_payload(tmp_path: Path) -> None:
+    artifact = tmp_path / "scratch.log"
+    artifact.write_text("temporary", encoding="utf-8")
+    controller = CleanupController(managed_root=tmp_path)
+    performed = controller.request_cleanup("scratch.log")
     assert performed["event_type"] == "cleanup.performed"
     assert performed["actor_role"] == "operator"
     assert performed["target_class"] == "deletable_artifact"
     assert performed["outcome"] == "performed"
     assert performed["reason"] == "user_requested"
+    assert not artifact.exists()
 
     rejected = controller.request_cleanup("audit:event-1")
     assert rejected["event_type"] == "cleanup.rejected"

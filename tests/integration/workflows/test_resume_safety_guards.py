@@ -29,3 +29,13 @@ def test_stale_running_state_recovers_via_paused_then_resumable() -> None:
     )
     assert result["state"] == "resumable"
     assert result["transitions"] == ["paused", "resumable"]
+
+
+def test_stale_running_state_does_not_force_resume_when_worker_is_alive() -> None:
+    result = recover_startup_state(
+        current_state="running",
+        last_heartbeat_seconds=600,
+        worker_alive=True,
+    )
+    assert result["state"] == "running"
+    assert result["transitions"] == []

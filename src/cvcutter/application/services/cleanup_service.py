@@ -48,7 +48,16 @@ def cleanup_artifact(
             outcome="rejected",
             reason="policy_protected",
         )
-    root = (managed_root or Path.cwd()).resolve()
+    if managed_root is None:
+        return CleanupOutcome(
+            event_type="cleanup.rejected",
+            actor_role=actor_role,
+            target_class="deletable_artifact",
+            target_id=name,
+            outcome="rejected",
+            reason="policy_protected",
+        )
+    root = managed_root.resolve()
     artifact_path = _resolve_artifact_path(name, root)
     if artifact_path is None:
         return CleanupOutcome(

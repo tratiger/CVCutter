@@ -34,6 +34,32 @@ def test_cleanup_rejects_out_of_scope_paths(tmp_path: Path) -> None:
     assert out_of_scope.exists()
 
 
+def test_cleanup_rejects_relative_traversal_paths(tmp_path: Path) -> None:
+    managed_root = tmp_path / "managed"
+    managed_root.mkdir()
+    out_of_scope = tmp_path / "outside-relative.log"
+    out_of_scope.write_text("keep", encoding="utf-8")
+
+    result = cleanup_artifact(str(Path("..") / out_of_scope.name), managed_root=managed_root)
+
+    assert result.event_type == "cleanup.rejected"
+    assert result.target_class == "deletable_artifact"
+    assert result.reason == "policy_protected"
+    assert out_of_scope.exists()
+
+
+def test_cleanup_rejects_when_managed_root_is_not_configured(tmp_path: Path) -> None:
+    artifact = tmp_path / "scratch.log"
+    artifact.write_text("temporary", encoding="utf-8")
+
+    result = cleanup_artifact(str(artifact))
+
+    assert result.event_type == "cleanup.rejected"
+    assert result.target_class == "deletable_artifact"
+    assert result.reason == "policy_protected"
+    assert artifact.exists()
+
+
 def test_cleanup_rejects_when_filesystem_delete_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

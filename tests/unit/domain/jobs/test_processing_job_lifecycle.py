@@ -55,6 +55,22 @@ def test_running_job_can_cancel() -> None:
     assert job.state == JobState.CANCELED
 
 
+def test_paused_or_resumable_job_cannot_fail_or_cancel() -> None:
+    job = ProcessingJob("j6")
+    job.start()
+    job.pause()
+    with pytest.raises(RuntimeError):
+        job.fail()
+    with pytest.raises(RuntimeError):
+        job.cancel()
+
+    job.mark_resumable()
+    with pytest.raises(RuntimeError):
+        job.fail()
+    with pytest.raises(RuntimeError):
+        job.cancel()
+
+
 def test_workflow_stage_enum_uses_only_canonical_members() -> None:
     assert not hasattr(WorkflowStage, "SEGMENT")
     assert not hasattr(WorkflowStage, "MAP")
