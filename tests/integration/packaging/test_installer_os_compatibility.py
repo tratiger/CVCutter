@@ -53,6 +53,26 @@ def test_macos_12_is_blocked() -> None:
     assert result["reason"] == "unsupported_macos_version"
 
 
+def test_darwin_kernel_version_21_maps_to_unsupported_macos_12() -> None:
+    result = PlatformCompatibilityChecker().ensure_supported(
+        system="Darwin",
+        release="21.6.0",
+        machine="x86_64",
+    )
+    assert not result["supported"]
+    assert result["reason"] == "unsupported_macos_version"
+
+
+def test_darwin_kernel_version_22_maps_to_supported_macos_13() -> None:
+    result = PlatformCompatibilityChecker().ensure_supported(
+        system="Darwin",
+        release="22.1.0",
+        machine="arm64",
+    )
+    assert result["supported"]
+    assert result["reason"] == "ok"
+
+
 def test_non_target_os_is_blocked() -> None:
     result = PlatformCompatibilityChecker().ensure_supported(
         system="Linux",

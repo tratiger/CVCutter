@@ -5,13 +5,16 @@ from pathlib import Path
 
 from cvcutter.infrastructure.integrations.adapters import ApprovedAdapters
 
+JOB_ID = "11111111-1111-1111-1111-111111111111"
+SEGMENT_ID = "22222222-2222-2222-2222-222222222222"
+
 
 def test_publish_segment_success_result_has_required_contract_fields(tmp_path: Path) -> None:
     adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
     result = adapters.publish_segment(
-        "seg-1",
+        SEGMENT_ID,
         {"destination": "youtube"},
-        job_id="job-1",
+        job_id=JOB_ID,
     )
 
     assert result.provider == "youtube"
@@ -26,9 +29,9 @@ def test_publish_segment_success_result_has_required_contract_fields(tmp_path: P
 def test_publish_segment_rejects_non_approved_destination_as_policy_error(tmp_path: Path) -> None:
     adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
     result = adapters.publish_segment(
-        "seg-1",
+        SEGMENT_ID,
         {"destination": "vimeo"},
-        job_id="job-1",
+        job_id=JOB_ID,
     )
 
     assert result.provider == "youtube"
@@ -41,7 +44,7 @@ def test_publish_segment_rejects_non_approved_destination_as_policy_error(tmp_pa
 
 def test_publish_segment_missing_required_fields_returns_blocking_error(tmp_path: Path) -> None:
     adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
-    result = adapters.publish_segment("seg-1", {"title": "Track A"}, job_id="job-1")
+    result = adapters.publish_segment(SEGMENT_ID, {"title": "Track A"}, job_id=JOB_ID)
 
     assert result.category == "blocking"
     assert result.terminal
@@ -52,9 +55,9 @@ def test_publish_segment_missing_required_fields_returns_blocking_error(tmp_path
 def test_publish_segment_transient_retry_contract_uses_retry_after_when_present(tmp_path: Path) -> None:
     adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
     result = adapters.publish_segment(
-        "seg-1",
+        SEGMENT_ID,
         {"destination": "youtube", "simulate_http_429": True},
-        job_id="job-1",
+        job_id=JOB_ID,
     )
 
     assert result.category == "transient"
@@ -67,9 +70,9 @@ def test_publish_segment_transient_retry_contract_uses_retry_after_when_present(
 def test_publish_segment_duplicate_key_is_suppressed_idempotently(tmp_path: Path) -> None:
     state_path = tmp_path / "adapter-idempotency.json"
     first_adapter = ApprovedAdapters(state_path=state_path)
-    first = first_adapter.publish_segment("seg-1", {"destination": "youtube"}, job_id="job-1")
+    first = first_adapter.publish_segment(SEGMENT_ID, {"destination": "youtube"}, job_id=JOB_ID)
     second_adapter = ApprovedAdapters(state_path=state_path)
-    second = second_adapter.publish_segment("seg-1", {"destination": "youtube"}, job_id="job-1")
+    second = second_adapter.publish_segment(SEGMENT_ID, {"destination": "youtube"}, job_id=JOB_ID)
 
     assert first.idempotency_outcome == "performed"
     assert second.idempotency_outcome == "duplicate_suppressed"
@@ -81,9 +84,9 @@ def test_publish_segment_dedup_is_atomic_across_concurrent_calls(tmp_path: Path)
 
     def _publish_once() -> str:
         result = ApprovedAdapters(state_path=state_path).publish_segment(
-            "seg-1",
+            SEGMENT_ID,
             {"destination": "youtube"},
-            job_id="job-1",
+            job_id=JOB_ID,
         )
         return result.idempotency_outcome
 
@@ -97,9 +100,9 @@ def test_publish_segment_blocks_when_idempotency_store_is_corrupted(tmp_path: Pa
     state_path = tmp_path / "adapter-idempotency.json"
     state_path.write_text("{malformed", encoding="utf-8")
     result = ApprovedAdapters(state_path=state_path).publish_segment(
-        "seg-1",
+        SEGMENT_ID,
         {"destination": "youtube"},
-        job_id="job-1",
+        job_id=JOB_ID,
     )
     assert result.category == "blocking"
     assert result.error_code == "idempotency_store_corrupt"
@@ -109,9 +112,9 @@ def test_publish_segment_blocks_when_idempotency_store_is_unreadable(tmp_path: P
     unreadable_path = tmp_path / "adapter-idempotency.json"
     unreadable_path.mkdir()
     result = ApprovedAdapters(state_path=unreadable_path).publish_segment(
-        "seg-1",
+        SEGMENT_ID,
         {"destination": "youtube"},
-        job_id="job-1",
+        job_id=JOB_ID,
     )
     assert result.category == "blocking"
     assert result.error_code == "idempotency_store_unreadable"
@@ -123,9 +126,26 @@ def test_publish_segment_blocks_when_idempotency_lock_cannot_be_acquired(tmp_pat
     state_path = blocking_parent / "adapter-idempotency.json"
 
     result = ApprovedAdapters(state_path=state_path).publish_segment(
-        "seg-1",
+        SEGMENT_ID,
         {"destination": "youtube"},
-        job_id="job-1",
+        job_id=JOB_ID,
     )
     assert result.category == "blocking"
     assert result.error_code == "idempotency_store_lock_failed"
+
+
+def test_publish_segment_rejects_invalid_identifiers(tmp_path: Path) -> None:
+    adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
+    invalid_job = adapters.publish_segment(SEGMENT_ID, {"destination": "youtube"}, job_id="job-1")
+    invalid_segment = adapters.publish_segment("segment-1", {"destination": "youtube"}, job_id=JOB_ID)
+
+    assert invalid_job.error_code == "invalid_job_id"
+    assert invalid_segment.error_code == "invalid_segment_id"
+
+
+def test_classify_content_does_not_leak_input_into_external_object_id(tmp_path: Path) -> None:
+    adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
+    result = adapters.classify_content("private content should not become object id", job_id=JOB_ID)
+
+    assert result.category == "success"
+    assert result.external_object_id is None

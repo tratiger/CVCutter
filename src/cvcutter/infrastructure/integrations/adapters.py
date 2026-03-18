@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import gettempdir
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from cvcutter.domain.policies.destination_policy import ensure_destination_allowed
 
@@ -67,6 +67,29 @@ class ApprovedAdapters:
         *,
         job_id: str,
     ) -> AdapterResult:
+        if not _is_valid_uuid(job_id):
+            return AdapterResult(
+                provider="youtube",
+                operation="publish_segment",
+                category="blocking",
+                terminal=True,
+                idempotency_outcome="unknown",
+                recommended_next_action="fix_policy_configuration",
+                message="job_id must be a valid UUID",
+                error_code="invalid_job_id",
+            )
+        if not _is_valid_uuid(segment_id):
+            return AdapterResult(
+                provider="youtube",
+                operation="publish_segment",
+                category="blocking",
+                terminal=True,
+                idempotency_outcome="unknown",
+                recommended_next_action="fix_policy_configuration",
+                message="segment_id must be a valid UUID",
+                error_code="invalid_segment_id",
+            )
+
         mandatory = {"destination"}
         if not mandatory.issubset(metadata):
             return AdapterResult(
@@ -199,7 +222,7 @@ class ApprovedAdapters:
             recommended_next_action="none",
             message="classification completed",
             correlation_id=f"{job_id}:classification",
-            external_object_id=text[:32],
+            external_object_id=None,
         )
 
     def _safe_load_seen_publish_keys(
@@ -265,3 +288,11 @@ class ApprovedAdapters:
                     import fcntl
 
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _is_valid_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True

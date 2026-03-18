@@ -26,9 +26,11 @@ class PlatformCompatibilityChecker:
             return {"supported": True, "reason": "ok"}
 
         if normalized_system == "darwin":
-            mac_release = (release or platform.mac_ver()[0] or platform.release()).strip()
+            mac_release = (release or platform.mac_ver()[0]).strip()
             if normalized_machine not in _MAC_ARCH:
                 return {"supported": False, "reason": "unsupported_architecture"}
+            if not mac_release:
+                return {"supported": False, "reason": "unsupported_macos_version"}
             if not self._is_supported_macos_version(mac_release):
                 return {"supported": False, "reason": "unsupported_macos_version"}
             return {"supported": True, "reason": "ok"}
@@ -41,6 +43,8 @@ class PlatformCompatibilityChecker:
 
     def _is_supported_macos_version(self, release: str) -> bool:
         major = self._parse_major(release)
+        if major >= 20:
+            major -= 9
         return major >= 13
 
     def _parse_major(self, raw_version: str) -> int:
