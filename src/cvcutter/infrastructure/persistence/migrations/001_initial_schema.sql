@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS publish_keys (
 CREATE TABLE IF NOT EXISTS locks (
     lock_name TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
-    state TEXT NOT NULL
+    state TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS events (

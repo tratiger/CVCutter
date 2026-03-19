@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,18 @@ def _is_truthy(value: str | bool | None) -> bool:
     return normalized in {"1", "true", "yes", "on"}
 
 
+def _should_treat_worker_alive(
+    lock_info: tuple[str, int] | None,
+    *,
+    job_id: str,
+    stale_threshold_seconds: int = 300,
+) -> bool:
+    if lock_info is None:
+        return False
+    owner, heartbeat_age = lock_info
+    return owner == job_id and heartbeat_age <= stale_threshold_seconds
+
+
 @dataclass(slots=True)
 class AppBootstrap:
     checker: PlatformCompatibilityChecker
@@ -30,14 +43,26 @@ class AppBootstrap:
         if not result["supported"]:
             return {"status": "blocked", "reason": result["reason"]}
         if self.repositories is not None:
-            recovery = StartupRecoveryService(self.repositories)
-            active_owner = self.repositories.get_active_job_lock_owner()
-            for job_id in self.repositories.list_jobs_by_state("running"):
-                recovery.recover_job_state(
-                    job_id=job_id,
-                    last_heartbeat_seconds=600,
-                    worker_alive=(active_owner == job_id),
-                )
+            try:
+                recovery = StartupRecoveryService(self.repositories)
+                lock_info = self.repositories.get_active_job_lock_info()
+                for job_id in self.repositories.list_jobs_by_state("running"):
+                    if _should_treat_worker_alive(lock_info, job_id=job_id):
+                        if lock_info is None:
+                            heartbeat_age = 0
+                        else:
+                            heartbeat_age = lock_info[1]
+                        worker_alive = True
+                    else:
+                        heartbeat_age = 600
+                        worker_alive = False
+                    recovery.recover_job_state(
+                        job_id=job_id,
+                        last_heartbeat_seconds=heartbeat_age,
+                        worker_alive=worker_alive,
+                    )
+            except (OSError, RuntimeError, sqlite3.Error):
+                return {"status": "blocked", "reason": "startup_recovery_failed"}
         recovered_from_block = _is_truthy(result.get("recovered_from_block"))
         operator_confirmed = _is_truthy(result.get("operator_confirmed"))
         try:

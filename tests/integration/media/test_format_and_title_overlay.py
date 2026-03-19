@@ -26,13 +26,7 @@ def test_export_media_file_copies_to_mp4_output(tmp_path: Path) -> None:
     output_path = tmp_path / "output.mp4"
     input_path.write_bytes(b"fake-media-bytes")
 
-    exported = export_media_file(
-        input_path,
-        output_path,
-        output_format="mp4",
-        title_overlay_enabled=True,
-        title_duration_seconds=2,
-    )
+    exported = export_media_file(input_path, output_path, output_format="mp4")
 
     assert exported == output_path
     assert output_path.read_bytes() == b"fake-media-bytes"
@@ -54,6 +48,20 @@ def test_export_media_file_rejects_unsupported_input_type(tmp_path: Path) -> Non
         export_media_file(input_path, output_path, output_format="mp4")
 
 
+def test_export_media_file_rejects_unimplemented_title_overlay(tmp_path: Path) -> None:
+    input_path = tmp_path / "source.mp4"
+    output_path = tmp_path / "output.mp4"
+    input_path.write_bytes(b"fake-media-bytes")
+    with pytest.raises(RuntimeError, match="title_overlay_not_supported"):
+        export_media_file(
+            input_path,
+            output_path,
+            output_format="mp4",
+            title_overlay_enabled=True,
+            title_duration_seconds=2,
+        )
+
+
 def test_export_media_file_transcodes_non_mp4_inputs_with_ffmpeg(monkeypatch, tmp_path: Path) -> None:
     input_path = tmp_path / "source.wav"
     output_path = tmp_path / "output.mp4"
@@ -71,6 +79,27 @@ def test_export_media_file_transcodes_non_mp4_inputs_with_ffmpeg(monkeypatch, tm
     exported = export_media_file(input_path, output_path, output_format="mp4")
     assert exported == output_path
     assert output_path.read_bytes() == b"fake-transcoded-mp4"
+
+
+def test_export_media_file_ffmpeg_command_has_no_overlay_filters_when_disabled(
+    monkeypatch, tmp_path: Path
+) -> None:
+    input_path = tmp_path / "source.wav"
+    output_path = tmp_path / "output.mp4"
+    input_path.write_bytes(b"fake-wav-bytes")
+    observed: dict[str, list[str]] = {"command": []}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(command, capture_output, text, check):
+        observed["command"] = list(command)
+        output_path.write_bytes(b"fake-transcoded-mp4")
+        return _Result()
+
+    monkeypatch.setattr("cvcutter.infrastructure.media.export_pipeline.subprocess.run", _fake_run)
+    export_media_file(input_path, output_path, output_format="mp4", title_overlay_enabled=False)
+    assert "-filter_complex" not in observed["command"]
 
 
 def test_export_media_file_raises_when_ffmpeg_transcode_fails(monkeypatch, tmp_path: Path) -> None:

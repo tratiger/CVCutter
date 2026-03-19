@@ -5,6 +5,7 @@ import pytest
 from cvcutter.application.workflows.processing_workflow import ProcessingWorkflow, WorkflowExecutionError
 from cvcutter.domain.jobs.processing_job import ProcessingJob
 from cvcutter.domain.jobs.stages import WorkflowStage
+from cvcutter.infrastructure.persistence.repositories import SqliteRepositories
 
 
 def test_processing_workflow_persists_checkpoints_and_events(sqlite_repo) -> None:
@@ -45,6 +46,49 @@ def test_workflow_resume_uses_persisted_checkpoints(sqlite_repo) -> None:
 
     resumed_job = ProcessingJob(job_id)
     assert workflow.resume(resumed_job) == "segment_detect"
+
+
+def test_workflow_resume_understands_legacy_stage_aliases(sqlite_repo) -> None:
+    job_id = "11111111-1111-1111-1111-111111111158"
+    sqlite_repo.insert_checkpoint(job_id, "ingest", 1, "completed")
+    sqlite_repo.insert_checkpoint(job_id, "classify", 1, "completed")
+    sqlite_repo.insert_checkpoint(job_id, "segment", 1, "completed")
+    workflow = ProcessingWorkflow(repositories=sqlite_repo)
+
+    resumed_job = ProcessingJob(job_id)
+    assert workflow.resume(resumed_job) == "sync"
+
+
+def test_workflow_resume_understands_legacy_alias_after_schema_migration(tmp_path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy-checkpoint.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE checkpoints (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO checkpoints(id, job_id, stage, status, created_at) VALUES
+                ('legacy-1', '11111111-1111-1111-1111-111111111159', 'ingest', 'completed', '2024-01-01T00:00:00Z'),
+                ('legacy-2', '11111111-1111-1111-1111-111111111159', 'classify', 'completed', '2024-01-01T00:00:01Z'),
+                ('legacy-3', '11111111-1111-1111-1111-111111111159', 'segment', 'completed', '2024-01-01T00:00:02Z');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    repo = SqliteRepositories(db_path)
+    repo.init_schema()
+    workflow = ProcessingWorkflow(repositories=repo)
+    resumed_job = ProcessingJob("11111111-1111-1111-1111-111111111159")
+    assert workflow.resume(resumed_job) == "sync"
 
 
 def test_processing_workflow_persists_failed_checkpoint_on_stage_error(sqlite_repo) -> None:
@@ -101,6 +145,71 @@ def test_workflow_checkpoint_persistence_failure_does_not_mask_with_state_error(
     with pytest.raises(WorkflowExecutionError) as raised:
         workflow.run_until_complete(job)
     assert "UNIQUE constraint failed" in str(raised.value)
+
+
+def test_workflow_heartbeat_updates_active_job_lock(sqlite_repo) -> None:
+    job_id = "11111111-1111-1111-1111-111111111160"
+    assert sqlite_repo.acquire_active_job_lock(job_id)
+    conn = sqlite_repo.connect()
+    try:
+        conn.execute(
+            "UPDATE locks SET heartbeat_at = datetime('now', '-1000 seconds') WHERE lock_name = 'active_job'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    workflow = ProcessingWorkflow(repositories=sqlite_repo)
+    workflow.run_until_complete(ProcessingJob(job_id))
+    lock_info = sqlite_repo.get_active_job_lock_info()
+    assert lock_info is not None
+    owner, heartbeat_age = lock_info
+    assert owner == job_id
+    assert heartbeat_age < 30
+
+
+def test_workflow_marks_failed_when_heartbeat_init_fails(sqlite_repo, monkeypatch) -> None:
+    job_id = "11111111-1111-1111-1111-111111111175"
+    workflow = ProcessingWorkflow(repositories=sqlite_repo)
+
+    def _raise_heartbeat(*_args, **_kwargs):
+        raise RuntimeError("heartbeat-failed")
+
+    monkeypatch.setattr(
+        "cvcutter.infrastructure.persistence.repositories.SqliteRepositories.touch_active_job_lock",
+        _raise_heartbeat,
+    )
+    with pytest.raises(WorkflowExecutionError) as raised:
+        workflow.run_until_complete(ProcessingJob(job_id))
+    assert "heartbeat-failed" in str(raised.value)
+    assert sqlite_repo.get_job_state(job_id) == "failed"
+
+
+def test_workflow_marks_failed_when_heartbeat_thread_fails(sqlite_repo, monkeypatch) -> None:
+    job_id = "11111111-1111-1111-1111-111111111176"
+    workflow = ProcessingWorkflow(repositories=sqlite_repo)
+    original_touch = SqliteRepositories.touch_active_job_lock
+    state = {"calls": 0}
+
+    def _flaky_touch(self: SqliteRepositories, active_job_id: str) -> None:
+        state["calls"] += 1
+        if state["calls"] == 1:
+            original_touch(self, active_job_id)
+            return
+        raise RuntimeError("heartbeat-thread-failed")
+
+    monkeypatch.setattr(SqliteRepositories, "touch_active_job_lock", _flaky_touch)
+
+    def _slow_classify(_job: ProcessingJob) -> None:
+        import time
+
+        time.sleep(2.5)
+
+    workflow.stage_handlers = {WorkflowStage.CLASSIFY: _slow_classify}
+    with pytest.raises(WorkflowExecutionError) as raised:
+        workflow.run_until_complete(ProcessingJob(job_id))
+    assert "heartbeat-thread-failed" in str(raised.value)
+    assert sqlite_repo.get_job_state(job_id) == "failed"
 
 
 def test_workflow_does_not_persist_completed_when_final_checkpoint_write_fails(sqlite_repo) -> None:

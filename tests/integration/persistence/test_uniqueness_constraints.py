@@ -159,3 +159,41 @@ def test_get_active_job_lock_owner(sqlite_repo) -> None:
     assert sqlite_repo.get_active_job_lock_owner() is None
     assert sqlite_repo.acquire_active_job_lock("job-1")
     assert sqlite_repo.get_active_job_lock_owner() == "job-1"
+
+
+def test_get_active_job_lock_info(sqlite_repo) -> None:
+    assert sqlite_repo.get_active_job_lock_info() is None
+    assert sqlite_repo.acquire_active_job_lock("job-1")
+    lock_info = sqlite_repo.get_active_job_lock_info()
+    assert lock_info is not None
+    owner, heartbeat_age = lock_info
+    assert owner == "job-1"
+    assert heartbeat_age >= 0
+
+
+def test_locks_legacy_schema_is_migrated_with_heartbeat(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-locks.db"
+    legacy_conn = sqlite3.connect(db_path)
+    try:
+        legacy_conn.executescript(
+            """
+            CREATE TABLE locks (
+                lock_name TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                state TEXT NOT NULL
+            );
+            INSERT INTO locks(lock_name, owner, state)
+            VALUES ('active_job', 'job-legacy', 'active');
+            """
+        )
+        legacy_conn.commit()
+    finally:
+        legacy_conn.close()
+
+    repo = SqliteRepositories(db_path)
+    repo.init_schema()
+    lock_info = repo.get_active_job_lock_info()
+    assert lock_info is not None
+    owner, heartbeat_age = lock_info
+    assert owner == "job-legacy"
+    assert heartbeat_age >= 300

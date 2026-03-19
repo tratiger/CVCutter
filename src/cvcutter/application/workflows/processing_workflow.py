@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from typing import Callable
 
 from cvcutter.application.dto.events import ProcessingEvent
 from cvcutter.application.services.resume_service import select_first_incomplete_stage
 from cvcutter.domain.jobs.processing_job import ProcessingJob
-from cvcutter.domain.jobs.stages import JobState, WorkflowStage
+from cvcutter.domain.jobs.stages import JobState, WorkflowStage, normalize_stage_value
 from cvcutter.infrastructure.persistence.repositories import SqliteRepositories
 
 
@@ -23,9 +24,43 @@ class ProcessingWorkflow:
     stage_handlers: dict[WorkflowStage, Callable[[ProcessingJob], None]] | None = None
 
     @staticmethod
+    def _stop_lock_heartbeat(handle: tuple[threading.Event, threading.Thread] | None) -> None:
+        if handle is None:
+            return
+        stop_event, thread = handle
+        stop_event.set()
+        thread.join(timeout=1.0)
+
+    def _start_lock_heartbeat(
+        self,
+        job_id: str,
+        heartbeat_failure: list[Exception],
+    ) -> tuple[threading.Event, threading.Thread] | None:
+        repositories = self.repositories
+        if repositories is None:
+            return None
+        stop_event = threading.Event()
+
+        def _heartbeat_loop() -> None:
+            while not stop_event.wait(2.0):
+                try:
+                    repositories.touch_active_job_lock(job_id)
+                except Exception as error:  # pragma: no cover - background failure path
+                    heartbeat_failure.append(error)
+                    stop_event.set()
+                    break
+
+        # Emit an immediate heartbeat so startup stale checks are based on current activity.
+        repositories.touch_active_job_lock(job_id)
+        thread = threading.Thread(target=_heartbeat_loop, name=f"job-lock-heartbeat-{job_id}", daemon=True)
+        thread.start()
+        return stop_event, thread
+
+    @staticmethod
     def _parse_checkpoint_stage(stage_name: str) -> WorkflowStage | None:
+        normalized = normalize_stage_value(stage_name)
         try:
-            return WorkflowStage(stage_name)
+            return WorkflowStage(normalized)
         except ValueError:
             return None
 
@@ -71,7 +106,7 @@ class ProcessingWorkflow:
                     continue
                 stage = self._parse_checkpoint_stage(stage_name)
                 if stage is None:
-                    continue
+                    raise RuntimeError(f"unsupported_checkpoint_stage:{stage_name}")
                 completed_from_db.append(stage)
             if completed_from_db:
                 ordered: list[WorkflowStage] = []
@@ -95,64 +130,94 @@ class ProcessingWorkflow:
         event_log: list[ProcessingEvent] = []
         job.start()
         self._sync_job_state(job)
-        self._append_event(
-            event_log,
-            ProcessingEvent.new(
-                "job.created",
-                job.job_id,
-                {"state": job.state.value},
-                severity="info",
-                attempt=job.active_attempt,
-            ),
-        )
-        while job.state.value == "running":
-            stage_name = "unknown"
-            current_stage: WorkflowStage | None = None
-            try:
-                stage = job.stages[job.stage_index]
-                current_stage = stage
-                stage_name = stage.value
-                self._append_event(
-                    event_log,
-                    ProcessingEvent.new(
-                        "stage.started",
-                        job.job_id,
-                        {"state": job.state.value},
-                        stage_name=stage_name,
-                        attempt=job.active_attempt,
-                    ),
-                )
-                handler = self._resolve_stage_handler(stage)
-                if handler is not None:
-                    handler(job)
-                completed_stage = job.complete_current_stage()
+        heartbeat_failure: list[Exception] = []
+        heartbeat_handle: tuple[threading.Event, threading.Thread] | None = None
+        try:
+            heartbeat_handle = self._start_lock_heartbeat(job.job_id, heartbeat_failure)
+            self._append_event(
+                event_log,
+                ProcessingEvent.new(
+                    "job.created",
+                    job.job_id,
+                    {"state": job.state.value},
+                    severity="info",
+                    attempt=job.active_attempt,
+                ),
+            )
+            while job.state.value == "running":
+                if heartbeat_failure:
+                    raise RuntimeError(str(heartbeat_failure[0]))
+                stage_name = "unknown"
+                current_stage: WorkflowStage | None = None
                 try:
-                    self._record_checkpoint(job, completed_stage, "completed")
-                except Exception:
-                    self._rollback_stage_completion(job, completed_stage)
-                    raise
-                self._sync_job_state(job)
-            except Exception as error:
-                failure_error = error
-                if job.state.value == "running":
+                    stage = job.stages[job.stage_index]
+                    current_stage = stage
+                    stage_name = stage.value
+                    self._append_event(
+                        event_log,
+                        ProcessingEvent.new(
+                            "stage.started",
+                            job.job_id,
+                            {"state": job.state.value},
+                            stage_name=stage_name,
+                            attempt=job.active_attempt,
+                        ),
+                    )
+                    handler = self._resolve_stage_handler(stage)
+                    if handler is not None:
+                        handler(job)
+                    completed_stage = job.complete_current_stage()
                     try:
-                        job.fail()
-                        self._sync_job_state(job)
-                    except Exception as transition_error:  # pragma: no cover - defensive guard
-                        failure_error = transition_error
-                if current_stage is not None and current_stage not in job.completed_stages:
+                        self._record_checkpoint(job, completed_stage, "completed")
+                    except Exception:
+                        self._rollback_stage_completion(job, completed_stage)
+                        raise
+                    self._sync_job_state(job)
+                except Exception as error:
+                    failure_error = error
+                    if job.state.value == "running":
+                        try:
+                            job.fail()
+                            self._sync_job_state(job)
+                        except Exception as transition_error:  # pragma: no cover - defensive guard
+                            failure_error = transition_error
+                    if current_stage is not None and current_stage not in job.completed_stages:
+                        try:
+                            self._record_checkpoint(job, current_stage, "failed")
+                        except Exception:
+                            pass
                     try:
-                        self._record_checkpoint(job, current_stage, "failed")
+                        self._append_event(
+                            event_log,
+                            ProcessingEvent.new(
+                                "stage.failed",
+                                job.job_id,
+                                {"state": job.state.value},
+                                severity="error",
+                                stage_name=stage_name,
+                                attempt=job.active_attempt,
+                            ),
+                        )
+                        self._append_event(
+                            event_log,
+                            ProcessingEvent.new(
+                                "job.state_changed",
+                                job.job_id,
+                                {"stage": stage_name, "state": job.state.value},
+                                severity="error",
+                                attempt=job.active_attempt,
+                            ),
+                        )
                     except Exception:
                         pass
+                    raise WorkflowExecutionError(str(failure_error), list(event_log)) from error
                 self._append_event(
                     event_log,
                     ProcessingEvent.new(
-                        "stage.failed",
+                        "stage.completed",
                         job.job_id,
                         {"state": job.state.value},
-                        severity="error",
-                        stage_name=stage_name,
+                        stage_name=completed_stage.value,
                         attempt=job.active_attempt,
                     ),
                 )
@@ -161,31 +226,23 @@ class ProcessingWorkflow:
                     ProcessingEvent.new(
                         "job.state_changed",
                         job.job_id,
-                        {"stage": stage_name, "state": job.state.value},
-                        severity="error",
+                        {"stage": completed_stage.value, "state": job.state.value},
                         attempt=job.active_attempt,
                     ),
                 )
-                raise WorkflowExecutionError(str(failure_error), list(event_log)) from error
-            self._append_event(
-                event_log,
-                ProcessingEvent.new(
-                    "stage.completed",
-                    job.job_id,
-                    {"state": job.state.value},
-                    stage_name=completed_stage.value,
-                    attempt=job.active_attempt,
-                ),
-            )
-            self._append_event(
-                event_log,
-                ProcessingEvent.new(
-                    "job.state_changed",
-                    job.job_id,
-                    {"stage": completed_stage.value, "state": job.state.value},
-                    attempt=job.active_attempt,
-                ),
-            )
+        except Exception as startup_error:
+            if isinstance(startup_error, WorkflowExecutionError):
+                raise
+            failure_error = startup_error
+            if job.state.value == "running":
+                try:
+                    job.fail()
+                    self._sync_job_state(job)
+                except Exception as transition_error:  # pragma: no cover - defensive guard
+                    failure_error = transition_error
+            raise WorkflowExecutionError(str(failure_error), list(event_log)) from startup_error
+        finally:
+            self._stop_lock_heartbeat(heartbeat_handle)
         return event_log
 
     def resume(self, job: ProcessingJob) -> str:

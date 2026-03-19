@@ -47,6 +47,8 @@ def export_media_file(
         raise ValueError("output_extension_mismatch")
     render_opening_title(title_overlay_enabled, title_duration_seconds)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if title_overlay_enabled:
+        raise RuntimeError("title_overlay_not_supported")
     if input_suffix == normalized_format:
         shutil.copy2(input_path, output_path)
         return output_path

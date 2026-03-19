@@ -4,6 +4,8 @@ from collections.abc import Sequence
 
 import numpy as np
 
+_MAX_CORRELATION_SAMPLES = 1_000_000
+
 
 def choose_sync_path(audio_sources: int, has_embedded_video_audio: bool = True) -> str:
     if audio_sources <= 0:
@@ -31,6 +33,8 @@ def estimate_offset_ms(
     target_centered = target - np.mean(target)
     if np.linalg.norm(reference_centered) == 0 or np.linalg.norm(target_centered) == 0:
         return 0
+    if reference_centered.size > _MAX_CORRELATION_SAMPLES or target_centered.size > _MAX_CORRELATION_SAMPLES:
+        raise ValueError("signals_too_long_for_alignment")
 
     # Use FFT-based cross-correlation to keep long-signal alignment bounded.
     correlation_size = target_centered.size + reference_centered.size - 1

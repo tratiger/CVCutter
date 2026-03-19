@@ -50,6 +50,7 @@ class SqliteRepositories:
             conn.executescript(sql)
             self._migrate_legacy_checkpoints(conn)
             self._migrate_legacy_publish_keys(conn)
+            self._migrate_locks_table(conn)
             self._migrate_audio_source_profiles(conn)
             self._migrate_metadata_mapping(conn)
             conn.commit()
@@ -136,6 +137,24 @@ class SqliteRepositories:
         )
         conn.execute("DROP TABLE publish_keys_legacy")
 
+    def _migrate_locks_table(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1]): str(row[2]).upper()
+            for row in conn.execute("PRAGMA table_info(locks)").fetchall()
+        }
+        if not columns:
+            return
+        if "heartbeat_at" not in columns:
+            conn.execute("ALTER TABLE locks ADD COLUMN heartbeat_at TEXT")
+            conn.execute(
+                "UPDATE locks SET heartbeat_at = datetime('now', '-3600 seconds') "
+                "WHERE lock_name = 'active_job' AND state = 'active'"
+            )
+        conn.execute(
+            "UPDATE locks SET heartbeat_at = CURRENT_TIMESTAMP "
+            "WHERE heartbeat_at IS NULL OR heartbeat_at = ''"
+        )
+
     def _migrate_audio_source_profiles(self, conn: sqlite3.Connection) -> None:
         columns = {
             str(row[1]): str(row[2]).upper()
@@ -201,18 +220,32 @@ class SqliteRepositories:
             conn.close()
         return [str(row[0]) for row in rows]
 
-    def get_active_job_lock_owner(self) -> str | None:
+    def get_active_job_lock_info(self) -> tuple[str, int] | None:
         conn = self.connect()
         try:
             row = conn.execute(
-                "SELECT owner FROM locks WHERE lock_name = ? AND state = ?",
+                "SELECT owner, CAST((julianday('now') - julianday(COALESCE(heartbeat_at, CURRENT_TIMESTAMP))) "
+                "* 86400 AS INTEGER) "
+                "FROM locks WHERE lock_name = ? AND state = ?",
                 ("active_job", "active"),
             ).fetchone()
         finally:
             conn.close()
         if row is None:
             return None
-        return str(row[0])
+        return str(row[0]), max(0, int(row[1]))
+
+    def get_active_job_lock_owner(self) -> str | None:
+        info = self.get_active_job_lock_info()
+        if info is None:
+            return None
+        return info[0]
+
+    def touch_active_job_lock(self, job_id: str) -> None:
+        self._execute_write(
+            "UPDATE locks SET heartbeat_at = CURRENT_TIMESTAMP WHERE lock_name = ? AND owner = ?",
+            ("active_job", job_id),
+        )
 
     def update_job_state(self, job_id: str, state: str) -> None:
         conn = self.connect()
@@ -489,7 +522,7 @@ class SqliteRepositories:
     def acquire_active_job_lock(self, job_id: str) -> bool:
         try:
             self._execute_write(
-                "INSERT INTO locks(lock_name, owner, state) VALUES (?, ?, ?)",
+                "INSERT INTO locks(lock_name, owner, state, heartbeat_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
                 ("active_job", job_id, "active"),
             )
             return True
@@ -514,7 +547,7 @@ class SqliteRepositories:
         lock_name = f"draft:{draft_id}"
         try:
             self._execute_write(
-                "INSERT INTO locks(lock_name, owner, state) VALUES (?, ?, ?)",
+                "INSERT INTO locks(lock_name, owner, state, heartbeat_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
                 (lock_name, owner, "active"),
             )
             return True

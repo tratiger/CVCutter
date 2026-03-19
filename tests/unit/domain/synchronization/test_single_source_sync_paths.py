@@ -34,6 +34,8 @@ def test_estimate_offset_ms_rejects_invalid_inputs() -> None:
         estimate_offset_ms([1.0, float("nan")], [1.0, 2.0], sample_rate=1000)
     with pytest.raises(ValueError):
         estimate_offset_ms([1.0, 2.0], [1.0, float("inf")], sample_rate=1000)
+    with pytest.raises(ValueError):
+        estimate_offset_ms([float(index % 3) for index in range(1_000_001)], [0.0, 1.0], sample_rate=1000)
 
 
 def test_estimate_offset_ms_returns_zero_for_flat_signals() -> None:

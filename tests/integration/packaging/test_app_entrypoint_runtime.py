@@ -81,6 +81,55 @@ def test_launch_does_not_force_recovery_when_active_job_lock_is_owned(tmp_path: 
     assert repo.get_job_state(job_id) == "running"
 
 
+def test_launch_recovers_running_job_when_lock_heartbeat_is_stale(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.db"
+    repo = SqliteRepositories(db_path)
+    repo.init_schema()
+    job_id = "11111111-1111-1111-1111-111111111173"
+    repo.insert_job(job_id, "running", "operator")
+    assert repo.acquire_active_job_lock(job_id)
+    conn = repo.connect()
+    try:
+        conn.execute(
+            "UPDATE locks SET heartbeat_at = datetime('now', '-1000 seconds') WHERE lock_name = 'active_job'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    bootstrap = AppBootstrap(
+        checker=_SupportedChecker(),
+        repositories=repo,
+        runtime_path=str(tmp_path),
+    )
+    launch_result = bootstrap.launch()
+    assert launch_result["status"] == "ready"
+    assert repo.get_job_state(job_id) == "resumable"
+
+
+def test_launch_blocks_when_recovery_raises(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "app.db"
+    repo = SqliteRepositories(db_path)
+    repo.init_schema()
+    repo.insert_job("11111111-1111-1111-1111-111111111174", "running", "operator")
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("recovery-failed")
+
+    monkeypatch.setattr(
+        "cvcutter.application.services.startup_recovery_service.StartupRecoveryService.recover_job_state",
+        _raise,
+    )
+    bootstrap = AppBootstrap(
+        checker=_SupportedChecker(),
+        repositories=repo,
+        runtime_path=str(tmp_path),
+    )
+    launch_result = bootstrap.launch()
+    assert launch_result["status"] == "blocked"
+    assert launch_result["reason"] == "startup_recovery_failed"
+
+
 def test_launch_blocks_when_confirmation_required_after_recovery(tmp_path: Path) -> None:
     # Ensure deterministic policy path regardless of host disk state.
     from cvcutter import app as app_module
