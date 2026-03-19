@@ -8,3 +8,7 @@ def test_accessibility_flags_enabled() -> None:
     shortcuts = profile["shortcuts"]
     assert isinstance(shortcuts, list)
     assert "ctrl+enter" in shortcuts
+    focus_order = profile["focus_order"]
+    assert isinstance(focus_order, list)
+    assert focus_order[0] == "source_selector"
+    assert profile["wcag_level"] == "AA-equivalent"

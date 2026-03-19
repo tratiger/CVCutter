@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS audio_source_profiles (
     source_name TEXT NOT NULL,
     source_kind TEXT NOT NULL,
     offset_ms INTEGER NOT NULL,
+    gain_db REAL NOT NULL DEFAULT 0.0,
+    noise_reduction_level REAL NOT NULL DEFAULT 0.0,
+    tuning_mode TEXT NOT NULL DEFAULT 'simple',
     quality_status TEXT NOT NULL,
     correction_resolution_status TEXT NOT NULL
 );
@@ -67,6 +70,8 @@ CREATE TABLE IF NOT EXISTS metadata_mapping (
     schema_version TEXT NOT NULL,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
+    source_trace TEXT NOT NULL DEFAULT '{}',
     publish_visibility TEXT NOT NULL,
     validation_status TEXT NOT NULL
 );

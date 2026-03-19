@@ -105,3 +105,57 @@ def test_publish_key_legacy_schema_is_migrated(tmp_path: Path) -> None:
     with pytest.raises(sqlite3.IntegrityError):
         repo.store_publish_key("job-legacy", "segment-legacy", "youtube")
     repo.store_publish_key("job-another", "segment-legacy", "youtube")
+
+
+def test_persistence_crud_for_segments_audio_mapping_role_events_and_config(sqlite_repo) -> None:
+    sqlite_repo.insert_segment("seg-1", "job-1", 100, 500, 82, "pending")
+    sqlite_repo.insert_audio_source_profile(
+        "audio-1",
+        "job-1",
+        "main",
+        "embedded_video",
+        0,
+        1.5,
+        0.2,
+        "simple",
+        "ok",
+        "not_required",
+    )
+    sqlite_repo.insert_metadata_mapping(
+        "map-1",
+        "job-1",
+        "seg-1",
+        "2",
+        "Track 1",
+        "desc",
+        ["concert", "live"],
+        {"source": "catalog"},
+        "public",
+        "valid",
+    )
+    sqlite_repo.insert_role_policy("role-1", "job-1", "operator", "editor,publisher")
+    sqlite_repo.append_event("job.created", "job-1", '{"state":"running"}')
+    sqlite_repo.record_config_change("job-1", "classification_strategy")
+
+    assert sqlite_repo.list_segments("job-1") == [("seg-1", 100, 500, 82, "pending")]
+    assert sqlite_repo.list_audio_source_profiles("job-1") == [
+        ("audio-1", "main", "embedded_video", 0, 1.5, 0.2, "simple", "ok", "not_required")
+    ]
+    assert sqlite_repo.list_metadata_mappings("job-1") == [
+        ("map-1", "seg-1", "2", "Track 1", ["concert", "live"], {"source": "catalog"}, "public", "valid")
+    ]
+    assert sqlite_repo.list_role_policies("job-1") == [("role-1", "operator", "editor,publisher")]
+    assert sqlite_repo.list_events("job-1") == [("job.created", "job-1", '{"state":"running"}')]
+    assert sqlite_repo.list_config_changes("job-1") == ["classification_strategy"]
+
+
+def test_upsert_job_updates_state_and_role(sqlite_repo) -> None:
+    sqlite_repo.insert_job("job-1", "draft", "operator")
+    sqlite_repo.upsert_job("job-1", "running", "operator")
+    assert sqlite_repo.get_job_state("job-1") == "running"
+
+
+def test_get_active_job_lock_owner(sqlite_repo) -> None:
+    assert sqlite_repo.get_active_job_lock_owner() is None
+    assert sqlite_repo.acquire_active_job_lock("job-1")
+    assert sqlite_repo.get_active_job_lock_owner() == "job-1"

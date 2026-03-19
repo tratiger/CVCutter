@@ -41,3 +41,14 @@ def test_segment_stream_detects_two_motion_regions_from_dummy_frames() -> None:
     assert 20 <= first[1] <= 27
     assert 30 <= second[0] <= 37
     assert 42 <= second[1] <= 49
+
+
+def test_segment_stream_uses_acceleration_branch_without_crash() -> None:
+    frames = _build_dummy_performance_frames()
+    segments = segment_stream(
+        frames=frames,
+        acceleration=True,
+        motion_ratio_threshold=0.01,
+        min_segment_length=4,
+    )
+    assert len(segments) >= 1

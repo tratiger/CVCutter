@@ -8,4 +8,11 @@ def accessibility_profile() -> dict[str, object]:
         "contrast_safe": True,
         "theme": "contrast_safe",
         "shortcuts": ["ctrl+enter", "alt+up", "alt+down"],
+        "focus_order": [
+            "source_selector",
+            "metadata_selector",
+            "strategy_selector",
+            "start_button",
+        ],
+        "wcag_level": "AA-equivalent",
     }

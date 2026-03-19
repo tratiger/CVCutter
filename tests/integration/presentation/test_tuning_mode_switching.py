@@ -9,3 +9,7 @@ def test_tuning_mode_actions_present() -> None:
     view.switch_tuning_mode("waveform")
     assert view.tuning_mode == "waveform"
     assert "waveform_offset_drag" in view.tuning_controls()
+    view.apply_decision("adjust")
+    summary = view.summary()
+    assert summary["review_status"] == "adjusted"
+    assert summary["selected_action"] == "adjust"

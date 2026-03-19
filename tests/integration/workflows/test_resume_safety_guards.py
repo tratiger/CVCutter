@@ -1,5 +1,6 @@
 from cvcutter.application.services.config_change_guard_service import ConfigChangeGuardService
 from cvcutter.application.services.startup_recovery_service import (
+    StartupRecoveryService,
     can_start_new_job,
     detect_stale_state,
     recover_startup_state,
@@ -39,3 +40,18 @@ def test_stale_running_state_does_not_force_resume_when_worker_is_alive() -> Non
     )
     assert result["state"] == "running"
     assert result["transitions"] == []
+
+
+def test_startup_recovery_service_updates_persisted_job_state(sqlite_repo) -> None:
+    job_id = "11111111-1111-1111-1111-111111111161"
+    sqlite_repo.insert_job(job_id, "running", "operator")
+    service = StartupRecoveryService(sqlite_repo)
+
+    result = service.recover_job_state(
+        job_id=job_id,
+        last_heartbeat_seconds=600,
+        worker_alive=False,
+    )
+
+    assert result["state"] == "resumable"
+    assert sqlite_repo.get_job_state(job_id) == "resumable"

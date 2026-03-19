@@ -49,12 +49,13 @@ def segment_stream(
     min_segment_length: int = 5,
     max_gap_frames: int = 2,
 ) -> list[tuple[int, int]]:
-    _ = acceleration
     if not frames:
         return []
+    var_threshold = 32 if acceleration else 16
+    history = 90 if acceleration else 120
     subtractor = cv2.createBackgroundSubtractorMOG2(
-        history=120,
-        varThreshold=16,
+        history=history,
+        varThreshold=var_threshold,
         detectShadows=False,
     )
     motion_flags: list[bool] = []
