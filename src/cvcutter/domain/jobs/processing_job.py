@@ -84,6 +84,12 @@ class ProcessingJob:
         self.ended_at = None
         self._touch()
 
+    def mark_ready(self) -> None:
+        if self.state != JobState.DRAFT:
+            raise RuntimeError("job can become ready only from draft state")
+        self.state = JobState.READY
+        self._touch()
+
     def complete_current_stage(self) -> WorkflowStage:
         if self.state != JobState.RUNNING:
             raise RuntimeError("job must be running")

@@ -23,6 +23,9 @@ def test_processing_workflow_persists_checkpoints_and_events(sqlite_repo) -> Non
     assert all(status == "completed" for _, _, status in checkpoints)
     assert any(event_type == "stage.started" for event_type, _, _ in stored_events)
     assert any(event_type == "stage.completed" for event_type, _, _ in stored_events)
+    detailed_events = sqlite_repo.list_events_detailed(job_id)
+    assert any(event["event_type"] == "stage.started" and event["is_minimal_audit"] for event in detailed_events)
+    assert any(event["event_type"] == "stage.completed" and event["is_minimal_audit"] for event in detailed_events)
     assert sqlite_repo.get_job_state(job_id) == "completed"
 
 

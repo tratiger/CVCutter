@@ -26,6 +26,21 @@ def test_processing_job_lifecycle_transitions() -> None:
     assert job.state == JobState.COMPLETED
 
 
+def test_draft_job_can_transition_to_ready_before_start() -> None:
+    job = ProcessingJob(_uuid("0"))
+    job.mark_ready()
+    assert job.state == JobState.READY
+    job.start()
+    assert job.state == JobState.RUNNING
+
+
+def test_mark_ready_rejects_non_draft_state() -> None:
+    job = ProcessingJob(_uuid("f"))
+    job.mark_ready()
+    with pytest.raises(RuntimeError, match="draft"):
+        job.mark_ready()
+
+
 def test_non_operator_role_blocked() -> None:
     job = ProcessingJob(_uuid("2"), role="editor")
     with pytest.raises(PermissionError):

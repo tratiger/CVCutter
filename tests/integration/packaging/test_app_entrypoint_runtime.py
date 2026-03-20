@@ -133,9 +133,17 @@ def test_launch_blocks_when_recovery_raises(tmp_path: Path, monkeypatch) -> None
 def test_launch_blocks_when_confirmation_required_after_recovery(tmp_path: Path) -> None:
     # Ensure deterministic policy path regardless of host disk state.
     from cvcutter import app as app_module
+    from cvcutter.application.services.storage_safety_service import StoragePolicyDecision
 
     original = app_module.evaluate_storage_policy_for_path
-    app_module.evaluate_storage_policy_for_path = lambda *_args, **_kwargs: (25, "confirmation_required")
+    app_module.evaluate_storage_policy_for_path = lambda *_args, **_kwargs: (
+        25,
+        StoragePolicyDecision(
+            policy="confirmation_required",
+            event_type="storage.confirmation_required",
+            payload={"free_gb": 25},
+        ),
+    )
     bootstrap = AppBootstrap(
         checker=_RecoveredChecker(),
         runtime_path=str(tmp_path),

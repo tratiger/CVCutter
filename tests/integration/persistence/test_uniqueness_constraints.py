@@ -146,6 +146,9 @@ def test_persistence_crud_for_segments_audio_mapping_role_events_and_config(sqli
     ]
     assert sqlite_repo.list_role_policies("job-1") == [("role-1", "operator", "editor,publisher")]
     assert sqlite_repo.list_events("job-1") == [("job.created", "job-1", '{"state":"running"}')]
+    detailed_events = sqlite_repo.list_events_detailed("job-1")
+    assert len(detailed_events) == 1
+    assert detailed_events[0]["is_minimal_audit"] is False
     assert sqlite_repo.list_config_changes("job-1") == ["classification_strategy"]
 
 

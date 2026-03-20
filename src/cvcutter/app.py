@@ -73,8 +73,8 @@ class AppBootstrap:
             )
         except OSError:
             return {"status": "blocked", "reason": "storage_probe_failed"}
-        if storage_policy in {"start_blocked", "safe_pause", "confirmation_required"}:
-            return {"status": "blocked", "reason": f"storage_{storage_policy}_{free_gb}gb"}
+        if storage_policy.policy in {"start_blocked", "safe_pause", "confirmation_required"}:
+            return {"status": "blocked", "reason": f"storage_{storage_policy.policy}_{free_gb}gb"}
         return {"status": "ready", "next": OnboardingView().first_draft_hint()}
 
 

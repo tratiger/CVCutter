@@ -10,7 +10,11 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     stage_name TEXT NOT NULL,
     attempt INTEGER NOT NULL,
     status TEXT NOT NULL,
+    resume_cursor TEXT,
+    input_fingerprint TEXT NOT NULL DEFAULT '',
+    output_fingerprint TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT,
     UNIQUE(job_id, stage_name, attempt)
 );
 
@@ -39,7 +43,8 @@ CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
     job_id TEXT,
-    payload TEXT NOT NULL
+    payload TEXT NOT NULL,
+    is_minimal_audit INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS segments (

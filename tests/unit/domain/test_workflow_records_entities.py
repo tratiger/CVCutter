@@ -5,11 +5,13 @@ import pytest
 from cvcutter.domain.entities.workflow_records import (
     AudioSourceProfile,
     ConfigurationChangeRecord,
+    JobEventLedger,
     JobDraftLock,
     MediaSegmentCandidate,
     MetadataMappingRecord,
     OperatorRolePolicy,
     PublishingTask,
+    StageCheckpoint,
 )
 
 
@@ -128,4 +130,53 @@ def test_lock_and_config_change_validation_rules() -> None:
             changed_fields=["classification_strategy"],
             dependency_impact=["classify"],
             decision="unknown",
+        )
+
+
+def test_stage_checkpoint_and_event_ledger_validation_rules() -> None:
+    checkpoint = StageCheckpoint(
+        checkpoint_id="cp-1",
+        job_id="job-1",
+        stage_name="segment",
+        attempt=1,
+        status="completed",
+        input_fingerprint="input-hash",
+    )
+    assert checkpoint.stage_name == "segment_detect"
+
+    event = JobEventLedger(
+        event_id="event-1",
+        event_schema_version="1",
+        event_type="job.created",
+        payload={"state": "running"},
+        job_id="job-1",
+        is_minimal_audit=True,
+    )
+    assert event.is_minimal_audit is True
+
+    with pytest.raises(ValueError):
+        StageCheckpoint(
+            checkpoint_id="cp-2",
+            job_id="job-1",
+            stage_name="invalid",
+            attempt=1,
+            status="completed",
+            input_fingerprint="input-hash",
+        )
+
+    with pytest.raises(ValueError):
+        JobEventLedger(
+            event_id="event-2",
+            event_schema_version="2",
+            event_type="job.created",
+            payload={},
+        )
+
+    with pytest.raises(ValueError):
+        JobEventLedger(
+            event_id="event-3",
+            event_schema_version="1",
+            event_type="job.created",
+            payload={"state": "running"},
+            job_id=None,
         )

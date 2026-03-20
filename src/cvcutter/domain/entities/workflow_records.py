@@ -3,9 +3,61 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from cvcutter.domain.jobs.stages import WorkflowStage, normalize_stage_value
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@dataclass(slots=True)
+class StageCheckpoint:
+    checkpoint_id: str
+    job_id: str
+    stage_name: str
+    attempt: int
+    status: str
+    resume_cursor: dict[str, object] | None = None
+    input_fingerprint: str = ""
+    output_fingerprint: str | None = None
+    created_at: datetime = field(default_factory=_utc_now)
+    completed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        normalized_stage = normalize_stage_value(self.stage_name)
+        if normalized_stage not in {stage.value for stage in WorkflowStage}:
+            raise ValueError("invalid_stage_name")
+        self.stage_name = normalized_stage
+        if self.attempt < 1:
+            raise ValueError("attempt must be >= 1")
+        if self.status not in {"pending", "running", "completed", "failed", "invalidated"}:
+            raise ValueError("invalid_checkpoint_status")
+        if not self.input_fingerprint:
+            raise ValueError("input_fingerprint_required")
+
+
+@dataclass(slots=True)
+class JobEventLedger:
+    event_id: str
+    event_schema_version: str
+    event_type: str
+    payload: dict[str, object]
+    occurred_at: datetime = field(default_factory=_utc_now)
+    job_id: str | None = None
+    stage_name: str | None = None
+    attempt: int | None = None
+    severity: str = "info"
+    is_minimal_audit: bool = False
+
+    def __post_init__(self) -> None:
+        if self.event_schema_version != "1":
+            raise ValueError("unsupported_event_schema_version")
+        if self.severity not in {"info", "warning", "error"}:
+            raise ValueError("invalid_event_severity")
+        if self.event_type.startswith(("job.", "stage.", "retry.", "publish.", "cleanup.")) and self.job_id is None:
+            raise ValueError("job_id_required_for_job_scoped_event")
+        if self.attempt is not None and self.attempt < 1:
+            raise ValueError("attempt must be >= 1")
 
 
 @dataclass(slots=True)

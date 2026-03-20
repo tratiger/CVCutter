@@ -76,12 +76,32 @@ class ProcessingWorkflow:
             "severity": event.severity,
             "payload": event.payload,
         }
-        self.repositories.append_event(event.event_type, event.job_id, json.dumps(payload, ensure_ascii=False))
+        self.repositories.append_event(
+            event.event_type,
+            event.job_id,
+            json.dumps(payload, ensure_ascii=False),
+            is_minimal_audit=self._is_minimal_audit_event(event.event_type),
+        )
 
     def _record_checkpoint(self, job: ProcessingJob, stage: WorkflowStage, status: str) -> None:
         if self.repositories is None:
             return
-        self.repositories.insert_checkpoint(job.job_id, stage.value, job.active_attempt, status)
+        self.repositories.insert_checkpoint(
+            job.job_id,
+            stage.value,
+            job.active_attempt,
+            status,
+            input_fingerprint=f"{job.job_id}:{stage.value}:{job.active_attempt}",
+            output_fingerprint=None if status != "completed" else f"{job.job_id}:{stage.value}:completed",
+        )
+
+    @staticmethod
+    def _is_minimal_audit_event(event_type: str) -> bool:
+        if event_type in {"job.created", "job.state_changed", "stage.started", "stage.completed", "stage.failed"}:
+            return True
+        if event_type.startswith("retry.") or event_type == "publish.dedup_blocked":
+            return True
+        return False
 
     def _sync_job_state(self, job: ProcessingJob) -> None:
         if self.repositories is None:

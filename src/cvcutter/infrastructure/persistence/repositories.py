@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
-import json
 
 
-REQUIRED_CHECKPOINT_COLUMNS = {"checkpoint_id", "job_id", "stage_name", "attempt", "status"}
+CHECKPOINT_CORE_COLUMNS = {"checkpoint_id", "job_id", "stage_name", "attempt", "status"}
+CHECKPOINT_CONTRACT_COLUMNS = {"resume_cursor", "input_fingerprint", "output_fingerprint", "completed_at"}
 REQUIRED_PUBLISH_KEY_COLUMNS = {"job_id", "segment_id", "destination"}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _default_checkpoint_input_fingerprint(job_id: str, stage_name: str, attempt: int, status: str) -> str:
+    return f"{job_id}:{stage_name}:{attempt}:{status}"
 
 
 @dataclass(slots=True)
@@ -51,6 +61,7 @@ class SqliteRepositories:
             self._migrate_legacy_checkpoints(conn)
             self._migrate_legacy_publish_keys(conn)
             self._migrate_locks_table(conn)
+            self._migrate_events_table(conn)
             self._migrate_audio_source_profiles(conn)
             self._migrate_metadata_mapping(conn)
             conn.commit()
@@ -63,7 +74,13 @@ class SqliteRepositories:
             return
 
         columns = {str(row[1]) for row in rows}
-        if REQUIRED_CHECKPOINT_COLUMNS.issubset(columns):
+        has_core = CHECKPOINT_CORE_COLUMNS.issubset(columns)
+        has_contract_columns = CHECKPOINT_CONTRACT_COLUMNS.issubset(columns)
+        if has_core and has_contract_columns:
+            return
+
+        if has_core and not has_contract_columns:
+            self._rebuild_checkpoints_table_to_contract(conn, columns)
             return
 
         if not {"job_id", "status"}.issubset(columns):
@@ -95,19 +112,96 @@ class SqliteRepositories:
                 stage_name TEXT NOT NULL,
                 attempt INTEGER NOT NULL,
                 status TEXT NOT NULL,
+                resume_cursor TEXT,
+                input_fingerprint TEXT NOT NULL DEFAULT '',
+                output_fingerprint TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
                 UNIQUE(job_id, stage_name, attempt)
             )
             """
         )
         conn.execute(
-            "INSERT INTO checkpoints(checkpoint_id, job_id, stage_name, attempt, status, created_at) "
+            "INSERT INTO checkpoints("
+            "checkpoint_id, job_id, stage_name, attempt, status, resume_cursor, input_fingerprint, output_fingerprint, "
+            "created_at, completed_at"
+            ") "
             f"SELECT {id_expression}, job_id, {stage_column}, "
             f"ROW_NUMBER() OVER (PARTITION BY job_id, {stage_column} ORDER BY {created_at_expression}, rowid), "
-            f"status, {created_at_expression} "
+            f"status, NULL, "
+            f"job_id || ':' || {stage_column} || ':' || "
+            f"ROW_NUMBER() OVER (PARTITION BY job_id, {stage_column} ORDER BY {created_at_expression}, rowid) || ':' || status, "
+            f"NULL, {created_at_expression}, "
+            f"CASE WHEN status = 'completed' THEN {created_at_expression} ELSE NULL END "
             "FROM checkpoints_legacy"
         )
         conn.execute("DROP TABLE checkpoints_legacy")
+
+    def _rebuild_checkpoints_table_to_contract(
+        self,
+        conn: sqlite3.Connection,
+        columns: set[str],
+    ) -> None:
+        conn.execute("ALTER TABLE checkpoints RENAME TO checkpoints_contract_legacy")
+        conn.execute(
+            """
+            CREATE TABLE checkpoints (
+                checkpoint_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                stage_name TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                resume_cursor TEXT,
+                input_fingerprint TEXT NOT NULL DEFAULT '',
+                output_fingerprint TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                UNIQUE(job_id, stage_name, attempt)
+            )
+            """
+        )
+        select_parts = [
+            "checkpoint_id",
+            "job_id",
+            "stage_name",
+            "attempt",
+            "status",
+            "resume_cursor" if "resume_cursor" in columns else "NULL AS resume_cursor",
+            "input_fingerprint"
+            if "input_fingerprint" in columns
+            else "job_id || ':' || stage_name || ':' || attempt || ':' || status AS input_fingerprint",
+            "output_fingerprint" if "output_fingerprint" in columns else "NULL AS output_fingerprint",
+            "created_at" if "created_at" in columns else "CURRENT_TIMESTAMP AS created_at",
+            "completed_at"
+            if "completed_at" in columns
+            else (
+                "CASE WHEN status = 'completed' THEN created_at ELSE NULL END AS completed_at"
+                if "created_at" in columns
+                else "CASE WHEN status = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END AS completed_at"
+            ),
+        ]
+        conn.execute(
+            "INSERT INTO checkpoints("
+            "checkpoint_id, job_id, stage_name, attempt, status, resume_cursor, input_fingerprint, "
+            "output_fingerprint, created_at, completed_at"
+            ") "
+            f"SELECT {', '.join(select_parts)} FROM checkpoints_contract_legacy"
+        )
+        conn.execute("DROP TABLE checkpoints_contract_legacy")
+        conn.execute(
+            "UPDATE checkpoints SET input_fingerprint = job_id || ':' || stage_name || ':' || attempt || ':' || status "
+            "WHERE input_fingerprint IS NULL OR input_fingerprint = ''"
+        )
+
+    def _migrate_events_table(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1]): str(row[2]).upper()
+            for row in conn.execute("PRAGMA table_info(events)").fetchall()
+        }
+        if not columns:
+            return
+        if "is_minimal_audit" not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN is_minimal_audit INTEGER NOT NULL DEFAULT 0")
 
     def _migrate_legacy_publish_keys(self, conn: sqlite3.Connection) -> None:
         rows = conn.execute("PRAGMA table_info(publish_keys)").fetchall()
@@ -260,10 +354,44 @@ class SqliteRepositories:
         if cursor.rowcount == 0:
             raise RuntimeError("job_not_found")
 
-    def insert_checkpoint(self, job_id: str, stage_name: str, attempt: int, status: str) -> None:
+    def insert_checkpoint(
+        self,
+        job_id: str,
+        stage_name: str,
+        attempt: int,
+        status: str,
+        *,
+        resume_cursor: dict[str, object] | None = None,
+        input_fingerprint: str | None = None,
+        output_fingerprint: str | None = None,
+        completed_at: str | None = None,
+    ) -> None:
+        effective_input_fingerprint = input_fingerprint or _default_checkpoint_input_fingerprint(
+            job_id,
+            stage_name,
+            attempt,
+            status,
+        )
+        resume_cursor_json = None if resume_cursor is None else json.dumps(resume_cursor, ensure_ascii=False)
+        effective_completed_at = completed_at
+        if effective_completed_at is None and status == "completed":
+            effective_completed_at = _utc_now_iso()
         self._execute_write(
-            "INSERT INTO checkpoints(checkpoint_id, job_id, stage_name, attempt, status) VALUES (?, ?, ?, ?, ?)",
-            (str(uuid4()), job_id, stage_name, attempt, status),
+            "INSERT INTO checkpoints("
+            "checkpoint_id, job_id, stage_name, attempt, status, resume_cursor, input_fingerprint, "
+            "output_fingerprint, completed_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid4()),
+                job_id,
+                stage_name,
+                attempt,
+                status,
+                resume_cursor_json,
+                effective_input_fingerprint,
+                output_fingerprint,
+                effective_completed_at,
+            ),
         )
 
     def list_checkpoints(self, job_id: str) -> list[tuple[str, int, str]]:
@@ -276,6 +404,39 @@ class SqliteRepositories:
         finally:
             conn.close()
         return [(str(row[0]), int(row[1]), str(row[2])) for row in rows]
+
+    def list_checkpoints_detailed(self, job_id: str) -> list[dict[str, object]]:
+        conn = self.connect()
+        try:
+            rows = conn.execute(
+                "SELECT checkpoint_id, stage_name, attempt, status, resume_cursor, input_fingerprint, "
+                "output_fingerprint, created_at, completed_at "
+                "FROM checkpoints WHERE job_id = ? ORDER BY attempt, stage_name",
+                (job_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        output: list[dict[str, object]] = []
+        for row in rows:
+            resume_cursor_raw = row[4]
+            resume_cursor = None
+            if resume_cursor_raw not in (None, ""):
+                resume_cursor = json.loads(str(resume_cursor_raw))
+            output.append(
+                {
+                    "checkpoint_id": str(row[0]),
+                    "job_id": job_id,
+                    "stage_name": str(row[1]),
+                    "attempt": int(row[2]),
+                    "status": str(row[3]),
+                    "resume_cursor": resume_cursor,
+                    "input_fingerprint": str(row[5]),
+                    "output_fingerprint": None if row[6] is None else str(row[6]),
+                    "created_at": str(row[7]),
+                    "completed_at": None if row[8] is None else str(row[8]),
+                }
+            )
+        return output
 
     def save_classification_strategy(self, job_id: str, strategy: str) -> None:
         self._execute_write(
@@ -477,10 +638,17 @@ class SqliteRepositories:
             conn.close()
         return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
 
-    def append_event(self, event_type: str, job_id: str | None, payload: str) -> None:
+    def append_event(
+        self,
+        event_type: str,
+        job_id: str | None,
+        payload: str,
+        *,
+        is_minimal_audit: bool = False,
+    ) -> None:
         self._execute_write(
-            "INSERT INTO events(event_type, job_id, payload) VALUES (?, ?, ?)",
-            (event_type, job_id, payload),
+            "INSERT INTO events(event_type, job_id, payload, is_minimal_audit) VALUES (?, ?, ?, ?)",
+            (event_type, job_id, payload, int(is_minimal_audit)),
         )
 
     def list_events(self, job_id: str | None = None) -> list[tuple[str, str | None, str]]:
@@ -499,6 +667,30 @@ class SqliteRepositories:
             conn.close()
         return [
             (str(row[0]), None if row[1] is None else str(row[1]), str(row[2]))
+            for row in rows
+        ]
+
+    def list_events_detailed(self, job_id: str | None = None) -> list[dict[str, object]]:
+        conn = self.connect()
+        try:
+            if job_id is None:
+                rows = conn.execute(
+                    "SELECT event_type, job_id, payload, is_minimal_audit FROM events ORDER BY id"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT event_type, job_id, payload, is_minimal_audit FROM events WHERE job_id = ? ORDER BY id",
+                    (job_id,),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [
+            {
+                "event_type": str(row[0]),
+                "job_id": None if row[1] is None else str(row[1]),
+                "payload": str(row[2]),
+                "is_minimal_audit": bool(int(row[3])),
+            }
             for row in rows
         ]
 

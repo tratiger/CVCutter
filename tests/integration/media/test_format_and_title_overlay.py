@@ -48,18 +48,34 @@ def test_export_media_file_rejects_unsupported_input_type(tmp_path: Path) -> Non
         export_media_file(input_path, output_path, output_format="mp4")
 
 
-def test_export_media_file_rejects_unimplemented_title_overlay(tmp_path: Path) -> None:
+def test_export_media_file_renders_title_overlay_when_enabled(monkeypatch, tmp_path: Path) -> None:
     input_path = tmp_path / "source.mp4"
     output_path = tmp_path / "output.mp4"
     input_path.write_bytes(b"fake-media-bytes")
-    with pytest.raises(RuntimeError, match="title_overlay_not_supported"):
-        export_media_file(
-            input_path,
-            output_path,
-            output_format="mp4",
-            title_overlay_enabled=True,
-            title_duration_seconds=2,
-        )
+    observed: dict[str, list[str]] = {"command": []}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(command, capture_output, text, check):
+        observed["command"] = list(command)
+        output_path.write_bytes(b"fake-overlayed-mp4")
+        return _Result()
+
+    monkeypatch.setattr("cvcutter.infrastructure.media.export_pipeline.subprocess.run", _fake_run)
+    exported = export_media_file(
+        input_path,
+        output_path,
+        output_format="mp4",
+        title_overlay_enabled=True,
+        title_duration_seconds=2,
+    )
+    assert exported == output_path
+    assert output_path.read_bytes() == b"fake-overlayed-mp4"
+    assert "-filter_complex" in observed["command"]
+    filter_expression = observed["command"][observed["command"].index("-filter_complex") + 1]
+    assert "drawtext=" in filter_expression
+    assert "between(t\\,0\\,2)" in filter_expression
 
 
 def test_export_media_file_transcodes_non_mp4_inputs_with_ffmpeg(monkeypatch, tmp_path: Path) -> None:
@@ -116,3 +132,40 @@ def test_export_media_file_raises_when_ffmpeg_transcode_fails(monkeypatch, tmp_p
     )
     with pytest.raises(RuntimeError, match="export_transcode_failed"):
         export_media_file(input_path, output_path, output_format="mp4")
+
+
+def test_export_media_file_renders_title_overlay_for_audio_only_input(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "source.wav"
+    output_path = tmp_path / "output.mp4"
+    input_path.write_bytes(b"fake-wav-bytes")
+    observed: dict[str, list[str]] = {"command": []}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(command, capture_output, text, check):
+        observed["command"] = list(command)
+        output_path.write_bytes(b"fake-audio-overlayed-mp4")
+        return _Result()
+
+    monkeypatch.setattr("cvcutter.infrastructure.media.export_pipeline.subprocess.run", _fake_run)
+    exported = export_media_file(
+        input_path,
+        output_path,
+        output_format="mp4",
+        title_overlay_enabled=True,
+        title_duration_seconds=4,
+    )
+    assert exported == output_path
+    assert output_path.read_bytes() == b"fake-audio-overlayed-mp4"
+    assert "-f" in observed["command"]
+    assert "lavfi" in observed["command"]
+    assert "-shortest" in observed["command"]
+    assert "-filter_complex" in observed["command"]
+    filter_expression = observed["command"][observed["command"].index("-filter_complex") + 1]
+    assert "[0:v]drawtext=" in filter_expression
+    assert "[vout]" in filter_expression
+    assert "-map" in observed["command"]
+    map_indices = [index for index, token in enumerate(observed["command"]) if token == "-map"]
+    assert observed["command"][map_indices[0] + 1] == "[vout]"
+    assert observed["command"][map_indices[1] + 1] == "1:a:0"
