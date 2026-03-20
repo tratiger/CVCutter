@@ -94,6 +94,63 @@ def test_workflow_resume_understands_legacy_alias_after_schema_migration(tmp_pat
     assert workflow.resume(resumed_job) == "sync"
 
 
+def test_workflow_resume_executes_remaining_stages_and_persists_state(sqlite_repo, tmp_path) -> None:
+    job_id = "11111111-1111-1111-1111-111111111177"
+    sqlite_repo.insert_checkpoint(job_id, "ingest", 2, "completed")
+    sqlite_repo.insert_checkpoint(job_id, "classify", 2, "completed")
+    sqlite_repo.insert_checkpoint(job_id, "segment_detect", 2, "completed")
+
+    input_video = tmp_path / "concert.mp4"
+    input_audio = tmp_path / "mic.wav"
+    input_video.write_bytes(b"video")
+    input_audio.write_bytes(b"audio")
+
+    resumed_job = ProcessingJob(
+        job_id,
+        active_attempt=2,
+        input_video_path=str(input_video),
+        input_audio_sources=[str(input_audio)],
+        metadata_source_refs={
+            "schema_version": "2",
+            "records": [
+                {
+                    "program_id": "P-701",
+                    "segment_title": "Track",
+                    "performer_display_name": "Artist",
+                    "publish_visibility": "public",
+                }
+            ],
+        },
+        output_prefs={"output_path": str(tmp_path / "out.mp4"), "destination": "youtube"},
+    )
+
+    workflow = ProcessingWorkflow(repositories=sqlite_repo)
+    resume_stage = workflow.resume(resumed_job)
+    assert resume_stage == "sync"
+    assert resumed_job.state.value == "completed"
+    checkpoints = sqlite_repo.list_checkpoints(job_id)
+    assert ("sync", 2, "completed") in checkpoints
+    assert ("map_metadata", 2, "completed") in checkpoints
+    assert ("export", 2, "completed") in checkpoints
+    assert ("publish", 2, "completed") in checkpoints
+    assert sqlite_repo.get_job_state(job_id) == "completed"
+
+
+def test_workflow_resume_marks_completed_when_no_remaining_stage(sqlite_repo) -> None:
+    job_id = "11111111-1111-1111-1111-111111111178"
+    for stage in ("ingest", "classify", "segment_detect", "sync", "map_metadata", "export", "publish"):
+        sqlite_repo.insert_checkpoint(job_id, stage, 1, "completed")
+
+    job = ProcessingJob(job_id)
+    workflow = ProcessingWorkflow(repositories=sqlite_repo)
+    result = workflow.resume(job)
+
+    assert result == "done"
+    assert job.state.value == "completed"
+    assert job.ended_at is not None
+    assert sqlite_repo.get_job_state(job_id) == "completed"
+
+
 def test_processing_workflow_persists_failed_checkpoint_on_stage_error(sqlite_repo) -> None:
     job_id = "11111111-1111-1111-1111-111111111152"
 

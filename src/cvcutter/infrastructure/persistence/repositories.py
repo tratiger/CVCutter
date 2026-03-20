@@ -464,6 +464,12 @@ class SqliteRepositories:
             (job_id, segment_id, destination),
         )
 
+    def delete_publish_key(self, job_id: str, segment_id: str, destination: str) -> None:
+        self._execute_write(
+            "DELETE FROM publish_keys WHERE job_id = ? AND segment_id = ? AND destination = ?",
+            (job_id, segment_id, destination),
+        )
+
     def insert_segment(
         self,
         segment_id: str,

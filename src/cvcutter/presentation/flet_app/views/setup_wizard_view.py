@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import flet as ft
+
 from cvcutter.presentation.flet_app.viewmodel_helpers import localized
 from cvcutter.presentation.flet_app.viewmodels.setup_wizard_viewmodel import SetupWizardViewModel
 
@@ -23,6 +25,26 @@ class SetupWizardView:
 
     def heading(self) -> str:
         return localized("setup.title")
+
+    def build_controls(self) -> list[ft.Control]:
+        return [
+            ft.Text(self.heading(), size=20),
+            ft.TextField(label="Source", value=self.viewmodel.source_path),
+            ft.TextField(label="Output", value=self.viewmodel.output_path),
+            ft.TextField(label="Metadata", value=self.viewmodel.metadata_path),
+            ft.Dropdown(
+                label="Classification Strategy",
+                value=self.viewmodel.classification_strategy,
+                options=[
+                    ft.dropdown.Option("content_based", "content_based"),
+                    ft.dropdown.Option("timestamp_based", "timestamp_based"),
+                ],
+            ),
+            ft.Text(
+                value=" / ".join(self.validation_guidance()) if self.validation_guidance() else "Validation: OK",
+                color=ft.Colors.RED_400 if self.validation_guidance() else ft.Colors.GREEN_400,
+            ),
+        ]
 
     def summary(self) -> dict[str, object]:
         return {

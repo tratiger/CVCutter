@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import flet as ft
+
+from cvcutter.presentation.flet_app.viewmodel_helpers import localized
+
 
 @dataclass(slots=True)
 class SegmentReviewView:
@@ -28,6 +32,23 @@ class SegmentReviewView:
         if self.tuning_mode == "simple":
             return ["level_slider", "noise_reduction_slider"]
         return ["waveform_preview", "waveform_offset_drag"]
+
+    def build_controls(self) -> list[ft.Control]:
+        action_buttons: list[ft.Control] = []
+        for action in self.decision_actions():
+            action_buttons.append(
+                ft.OutlinedButton(
+                    content=ft.Text(action.capitalize()),
+                    disabled=self.selected_action == action,
+                )
+            )
+        return [
+            ft.Text(localized("review.title"), size=20),
+            ft.Text(f"Tuning mode: {self.tuning_mode}"),
+            ft.Row(action_buttons),
+            ft.Text(f"Review status: {self.review_status}"),
+            ft.Text(f"Available controls: {', '.join(self.tuning_controls())}"),
+        ]
 
     def summary(self) -> dict[str, object]:
         return {

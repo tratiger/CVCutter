@@ -149,3 +149,24 @@ def test_classify_content_does_not_leak_input_into_external_object_id(tmp_path: 
 
     assert result.category == "success"
     assert result.external_object_id is None
+    assert str(result.payload["classification_reference_id"]).startswith("cls:")
+    assert "private content" not in str(result.payload["classification_reference_id"])
+
+
+def test_fetch_form_responses_does_not_expose_raw_form_id(tmp_path: Path) -> None:
+    adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
+    result = adapters.fetch_form_responses("sensitive-form-id", job_id=JOB_ID)
+
+    assert result.category == "success"
+    assert result.external_object_id is not None
+    assert "sensitive-form-id" not in str(result.external_object_id)
+    assert "sensitive-form-id" not in str(result.correlation_id)
+
+
+def test_adapter_correlation_ids_do_not_expose_job_id(tmp_path: Path) -> None:
+    adapters = ApprovedAdapters(state_path=tmp_path / "adapter-idempotency.json")
+    form_result = adapters.fetch_form_responses("form-safe", job_id=JOB_ID)
+    classify_result = adapters.classify_content("encore section", job_id=JOB_ID)
+
+    assert JOB_ID not in str(form_result.correlation_id)
+    assert JOB_ID not in str(classify_result.correlation_id)

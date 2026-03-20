@@ -1,3 +1,5 @@
+import flet as ft
+
 from cvcutter.presentation.flet_app.views.segment_review_view import SegmentReviewView
 
 
@@ -13,3 +15,9 @@ def test_tuning_mode_actions_present() -> None:
     summary = view.summary()
     assert summary["review_status"] == "adjusted"
     assert summary["selected_action"] == "adjust"
+
+
+def test_segment_review_build_controls_returns_flet_controls() -> None:
+    controls = SegmentReviewView().build_controls()
+    assert controls
+    assert all(isinstance(control, ft.Control) for control in controls)
