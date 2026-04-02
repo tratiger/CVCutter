@@ -1,12 +1,12 @@
-import threading
-
 import flet as ft
+from pathlib import Path
+import threading
+import datetime
 
+from cvcutter.data.models import Project, ProjectStatus
 from cvcutter.core.orchestrator import PipelineOrchestrator
-from cvcutter.data.models import Project
 from cvcutter.ui.components import FilePickerRow
 from cvcutter.utils.logger import logger
-
 
 class AppView(ft.Row):
     def __init__(self, orchestrator: PipelineOrchestrator, page: ft.Page):
@@ -16,7 +16,8 @@ class AppView(ft.Row):
         self.expand = True
 
         # State
-        self.current_project = Project(name="New Project")
+        default_name = f"New Project {datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.current_project = Project(name=default_name, output_dir=str(Path.home() / "Videos"))
         self.segments = []
         self.api_key = ""
 
@@ -62,6 +63,21 @@ class AppView(ft.Row):
             self._build_settings_view()
         ]
 
+    def _save_project_state(self):
+        """Helper to save the current project state without violating unique constraints."""
+        session = self.orchestrator.session
+        # Check if project with same name already exists in DB
+        existing = session.query(Project).filter_by(name=str(self.current_project.name)).first()
+
+        if existing is not None and getattr(existing, "id", None) != self.current_project.id:
+            # Merge with existing
+            self.current_project.id = existing.id
+            self.current_project = session.merge(self.current_project)
+        else:
+            session.add(self.current_project)
+
+        session.commit()
+
     def _build_process_view(self):
         vid_picker = FilePickerRow("Video File", lambda p: setattr(self.current_project, 'video_path', p), file_types=["mp4", "mov", "mkv", "mts", "MTS"])
         aud_picker = FilePickerRow("Mic Audio File", lambda p: setattr(self.current_project, 'audio_path', p), file_types=["wav", "mp3", "m4a"])
@@ -72,8 +88,17 @@ class AppView(ft.Row):
         status_text = ft.Text("")
 
         def run_all_process(e):
-            self.orchestrator.session.add(self.current_project)
-            self.orchestrator.session.commit()
+            if str(self.current_project.video_path) in ["None", ""]:
+                status_text.value = "Error: Please select a Video File first."
+                self._page_ref.update()
+                return
+
+            try:
+                self._save_project_state()
+            except Exception as ex:
+                status_text.value = f"Database Error: {ex} (Change project name in Settings)"
+                self._page_ref.update()
+                return
 
             status_text.value = "1/2: Mixing Audio..."
             self._page_ref.update()
@@ -117,6 +142,13 @@ class AppView(ft.Row):
         status_text = ft.Text("")
 
         def run_mapping(e):
+            try:
+                self._save_project_state()
+            except Exception as ex:
+                status_text.value = f"Database Error: {ex}"
+                self._page_ref.update()
+                return
+
             status_text.value = "Generating mapping..."
             self._page_ref.update()
 
@@ -146,6 +178,13 @@ class AppView(ft.Row):
         telop_checkbox = ft.Checkbox(label="Apply Telop", value=True)
 
         def run_render(e):
+            try:
+                self._save_project_state()
+            except Exception as ex:
+                status_text.value = f"Database Error: {ex}"
+                self._page_ref.update()
+                return
+
             status_text.value = "Rendering clips..."
             self._page_ref.update()
             def _worker():
