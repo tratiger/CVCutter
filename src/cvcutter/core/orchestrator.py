@@ -24,22 +24,22 @@ class PipelineOrchestrator:
 
     def sync_and_mix_audio(self, project: Project, offset_sec: float, video_vol: float, mic_vol: float) -> str:
         """Step 1: Sync Audio"""
-        if not project.video_path or not project.audio_path:
+        if str(project.video_path) in ["None", ""] or str(project.audio_path) in ["None", ""]:
             raise CVCutterError("Project must have video and audio paths set.")
 
         logger.info(f"Orchestrating audio sync for {project.name}")
-        out_audio = Path(project.output_dir) / f"{project.name}_mixed_audio.wav"
+        out_audio = Path(str(project.output_dir)) / f"{project.name}_mixed_audio.wav"
 
         self.audio_proc.mix_audio(
-            Path(project.video_path), Path(project.audio_path), out_audio,
+            Path(str(project.video_path)), Path(str(project.audio_path)), out_audio,
             video_vol=video_vol, mic_vol=mic_vol, offset_sec=offset_sec
         )
 
-        out_video = Path(project.output_dir) / f"{project.name}_master.mp4"
-        self.video_proc.apply_audio(Path(project.video_path), out_audio, out_video)
+        out_video = Path(str(project.output_dir)) / f"{project.name}_master.mp4"
+        self.video_proc.apply_audio(Path(str(project.video_path)), out_audio, out_video)
 
-        project.video_path = str(out_video)
-        project.status = ProjectStatus.AUDIO_SYNCED
+        project.video_path = str(out_video) # type: ignore
+        project.status = ProjectStatus.AUDIO_SYNCED # type: ignore
         self.session.commit()
         return str(out_video)
 
@@ -47,12 +47,25 @@ class PipelineOrchestrator:
         """Step 2: Detect clapping & bowing to suggest segments"""
         logger.info(f"Analyzing video for {project.name}")
 
-        if project.status.value not in [ProjectStatus.AUDIO_SYNCED.value, ProjectStatus.CREATED.value]:
+        if project.status.value not in [ProjectStatus.AUDIO_SYNCED.value, ProjectStatus.CREATED.value]: # type: ignore
             logger.warning("Project not in correct state, but analyzing anyway.")
 
-        clapping = self.analyzer.detect_clapping(Path(project.video_path))
+        if str(project.video_path) in ["None", ""]:
+            raise CVCutterError("No video path provided for analysis.")
 
-        project.status = ProjectStatus.VIDEO_ANALYZED
+        # Ensure we are passing a WAV file to librosa
+        out_audio = Path(str(project.output_dir)) / f"{project.name}_mixed_audio.wav"
+        if out_audio.exists():
+            analysis_audio = out_audio
+        else:
+            # User skipped sync, we need to extract audio from the video source for analysis
+            logger.info("No mixed audio found. Extracting audio track from video for analysis.")
+            analysis_audio = Path(str(project.output_dir)) / f"{project.name}_extracted_audio.wav"
+            self.audio_proc.extract_audio_from_video(Path(str(project.video_path)), analysis_audio)
+
+        clapping = self.analyzer.detect_clapping(analysis_audio)
+
+        project.status = ProjectStatus.VIDEO_ANALYZED # type: ignore
         self.session.commit()
         return clapping
 
@@ -61,9 +74,8 @@ class PipelineOrchestrator:
         logger.info(f"Generating mapping for {project.name}")
 
         program = []
-        if project.pdf_path:
-            # mock test requires checking if this list has items.
-            parsed = self.meta_service.parse_pdf_program(Path(project.pdf_path), api_key)
+        if str(project.pdf_path) not in ["None", ""]:
+            parsed = self.meta_service.parse_pdf_program(Path(str(project.pdf_path)), api_key)
             if parsed:
                 program = parsed
 
@@ -82,21 +94,21 @@ class PipelineOrchestrator:
             )
             self.session.add(perf)
 
-        project.status = ProjectStatus.MAPPED
+        project.status = ProjectStatus.MAPPED # type: ignore
         self.session.commit()
 
     def render_all(self, project: Project, apply_telop: bool = True):
         """Step 4: Render Subclips"""
         logger.info(f"Rendering all subclips for {project.name}")
         for idx, perf in enumerate(project.performances):
-            out_file = Path(project.output_dir) / f"{idx+1:02d}_{perf.performer}_{perf.title}.mp4"
+            out_file = Path(str(project.output_dir)) / f"{idx+1:02d}_{perf.performer}_{perf.title}.mp4"
             telop = f"{perf.performer}\n{perf.title}" if apply_telop else None
 
             self.video_proc.render_clip(
-                Path(project.video_path), out_file, perf.start_time, perf.end_time, telop_text=telop
+                Path(str(project.video_path)), out_file, perf.start_time, perf.end_time, telop_text=telop # type: ignore
             )
 
-        project.status = ProjectStatus.RENDERED
+        project.status = ProjectStatus.RENDERED # type: ignore
         self.session.commit()
 
     def upload_pending(self, project: Project):
@@ -111,7 +123,7 @@ class PipelineOrchestrator:
             if perf.is_uploaded:
                 continue
 
-            out_file = Path(project.output_dir) / f"{idx+1:02d}_{perf.performer}_{perf.title}.mp4"
+            out_file = Path(str(project.output_dir)) / f"{idx+1:02d}_{perf.performer}_{perf.title}.mp4"
             if not out_file.exists():
                 logger.error(f"Cannot upload {out_file}, file not found")
                 continue
@@ -133,11 +145,11 @@ class PipelineOrchestrator:
                 request = youtube.videos().insert(part=",".join(body.keys()), body=body, media_body=media)
                 response = request.execute()
 
-                perf.youtube_url = f"https://youtu.be/{response['id']}"
-                perf.is_uploaded = True
+                perf.youtube_url = f"https://youtu.be/{response['id']}" # type: ignore
+                perf.is_uploaded = True # type: ignore
                 self.session.commit()
             except Exception as e:
                 logger.error(f"Upload failed for {perf.title}: {e}")
 
-        project.status = ProjectStatus.UPLOADED
+        project.status = ProjectStatus.UPLOADED # type: ignore
         self.session.commit()

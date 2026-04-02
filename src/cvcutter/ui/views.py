@@ -1,12 +1,14 @@
-import flet as ft
-from pathlib import Path
-import threading
 import datetime
+import threading
+from pathlib import Path
 
-from cvcutter.data.models import Project, ProjectStatus
+import flet as ft
+
 from cvcutter.core.orchestrator import PipelineOrchestrator
+from cvcutter.data.models import Project
 from cvcutter.ui.components import FilePickerRow
 from cvcutter.utils.logger import logger
+
 
 class AppView(ft.Row):
     def __init__(self, orchestrator: PipelineOrchestrator, page: ft.Page):
