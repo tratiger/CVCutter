@@ -1,5 +1,7 @@
 import flet as ft
+
 from cvcutter.ui.components import FilePickerRow
+
 
 def main(page: ft.Page):
     print("Testing FilePickerRow...")

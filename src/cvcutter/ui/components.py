@@ -1,5 +1,7 @@
-import flet as ft
 from typing import Callable, Optional
+
+import flet as ft
+
 
 class FilePickerRow(ft.Row):
     def __init__(self, label: str, on_change: Callable[[str], None], is_dir: bool = False, file_types: Optional[list] = None):

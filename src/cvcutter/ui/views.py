@@ -4,11 +4,11 @@ import flet as ft
 
 from cvcutter.core.orchestrator import PipelineOrchestrator
 from cvcutter.data.models import Project
-from cvcutter.ui.components import FilePickerRow, WizardStep
+from cvcutter.ui.components import FilePickerRow
 from cvcutter.utils.logger import logger
 
 
-class AppView(ft.Container):
+class AppView(ft.Row):
     def __init__(self, orchestrator: PipelineOrchestrator, page: ft.Page):
         super().__init__()
         self.orchestrator = orchestrator
@@ -17,175 +17,131 @@ class AppView(ft.Container):
 
         # State
         self.current_project = Project(name="New Project")
-        self.current_step_index = 0
+        self.segments = []
+        self.api_key = ""
 
         # UI
-        self.main_area = ft.Container(expand=True, padding=20)
-        self.content = self.main_area
+        self.main_content = ft.Container(expand=True, padding=20)
 
-        self._build_steps()
-        self._show_step(0)
+        self.rail = ft.NavigationRail(
+            selected_index=0,
+            label_type=ft.NavigationRailLabelType.ALL,
+            min_width=150,
+            min_extended_width=250,
+            extended=True,
+            destinations=[
+                ft.NavigationRailDestination(icon=ft.icons.VIDEO_SETTINGS, label="1. 動画処理"),
+                ft.NavigationRailDestination(icon=ft.icons.PREVIEW, label="2. プレビュー & 紐付け"),
+                ft.NavigationRailDestination(icon=ft.icons.UPLOAD, label="3. アップロード"),
+                ft.NavigationRailDestination(icon=ft.icons.SETTINGS, label="設定"),
+            ],
+            on_change=self._on_rail_change,
+        )
 
-    def _build_steps(self):
-        self.steps = [
-            self._build_setup_step(),
-            self._build_audio_sync_step(),
-            self._build_analysis_step(),
-            self._build_mapping_step(),
-            self._build_render_step()
+        self.controls = [
+            self.rail,
+            ft.VerticalDivider(width=1),
+            self.main_content
         ]
 
-    def _show_step(self, index: int):
-        if 0 <= index < len(self.steps):
-            self.current_step_index = index
-            self.main_area.content = self.steps[index]
-            self._page_ref.update()
+        self._build_views()
+        self._update_main_content(0)
 
-    def _next_step(self, e=None):
-        self.orchestrator.session.add(self.current_project)
-        self.orchestrator.session.commit()
-        self._show_step(self.current_step_index + 1)
+    def _on_rail_change(self, e):
+        self._update_main_content(e.control.selected_index)
 
-    def _prev_step(self, e=None):
-        self._show_step(self.current_step_index - 1)
+    def _update_main_content(self, index: int):
+        self.main_content.content = self.views[index]
+        self._page_ref.update()
 
-    # --- Step 1: Setup ---
-    def _build_setup_step(self):
-        step = WizardStep("Project Setup", on_next=self._next_step)
+    def _build_views(self):
+        self.views = [
+            self._build_process_view(),
+            self._build_mapping_view(),
+            self._build_upload_view(),
+            self._build_settings_view()
+        ]
 
-        name_input = ft.TextField(label="Project Name", value=str(self.current_project.name),
-                                  on_change=lambda e: setattr(self.current_project, 'name', e.control.value))
-
-        vid_picker = FilePickerRow("Video File", lambda p: setattr(self.current_project, 'video_path', p), file_types=["mp4", "mov", "mkv"])
+    def _build_process_view(self):
+        vid_picker = FilePickerRow("Video File", lambda p: setattr(self.current_project, 'video_path', p), file_types=["mp4", "mov", "mkv", "mts", "MTS"])
         aud_picker = FilePickerRow("Mic Audio File", lambda p: setattr(self.current_project, 'audio_path', p), file_types=["wav", "mp3", "m4a"])
-        pdf_picker = FilePickerRow("PDF Program (Optional)", lambda p: setattr(self.current_project, 'pdf_path', p), file_types=["pdf"])
-        out_picker = FilePickerRow("Output Directory", lambda p: setattr(self.current_project, 'output_dir', p), is_dir=True)
 
-        step.set_content([name_input, vid_picker, aud_picker, pdf_picker, out_picker])
-        return step
-
-    # --- Step 2: Audio Sync ---
-    def _build_audio_sync_step(self):
-        step = WizardStep("Audio Synchronization", on_next=self._next_step, on_prev=self._prev_step)
-
-        self.offset_input = ft.TextField(label="Offset (seconds)", value="0.0")
-        self.vid_vol = ft.Slider(min=0, max=1.0, value=0.2, label="Video Volume")
-        self.mic_vol = ft.Slider(min=0, max=1.0, value=0.8, label="Mic Volume")
-
+        offset_input = ft.TextField(label="Sync Offset (seconds)", value="0.0")
+        vid_vol = ft.Slider(min=0, max=1.0, value=0.2, label="Video Volume")
+        mic_vol = ft.Slider(min=0, max=1.0, value=0.8, label="Mic Volume")
         status_text = ft.Text("")
 
-        def run_sync(e):
-            step.set_can_next(False)
-            status_text.value = "Processing... (Check logs)"
+        def run_all_process(e):
+            self.orchestrator.session.add(self.current_project)
+            self.orchestrator.session.commit()
+
+            status_text.value = "1/2: Mixing Audio..."
             self._page_ref.update()
 
             def _worker():
                 try:
-                    self.orchestrator.sync_and_mix_audio(
-                        self.current_project,
-                        float(str(self.offset_input.value)),
-                        float(self.vid_vol.value or 0.2),
-                        float(self.mic_vol.value or 0.8)
-                    )
-                    status_text.value = "Success! Mixed audio applied."
-                except Exception as ex:
-                    logger.error(ex)
-                    status_text.value = f"Error: {ex}"
-                finally:
-                    step.set_can_next(True)
+                    if str(self.current_project.audio_path) not in ["None", ""]:
+                        self.orchestrator.sync_and_mix_audio(
+                            self.current_project,
+                            float(str(offset_input.value)),
+                            float(vid_vol.value or 0.2),
+                            float(mic_vol.value or 0.8)
+                        )
+
+                    status_text.value = "2/2: Analyzing Video (Detecting cuts)..."
                     self._page_ref.update()
 
-            threading.Thread(target=_worker).start()
-
-        sync_btn = ft.ElevatedButton("Sync & Mix Audio", on_click=run_sync)
-
-        step.set_content([
-            ft.Text("Adjust volume levels and start mix."),
-            ft.Text("Video Track Volume"), self.vid_vol,
-            ft.Text("Mic Track Volume"), self.mic_vol,
-            self.offset_input,
-            sync_btn,
-            status_text
-        ])
-        return step
-
-    # --- Step 3: Analysis ---
-    def _build_analysis_step(self):
-        step = WizardStep("Video Analysis", on_next=self._next_step, on_prev=self._prev_step)
-
-        status_text = ft.Text("")
-        self.segments = []
-
-        def run_analysis(e):
-            step.set_can_next(False)
-            status_text.value = "Analyzing clapping and bowing... This will take a while."
-            self._page_ref.update()
-
-            def _worker():
-                try:
                     self.segments = self.orchestrator.analyze_video(self.current_project)
-                    status_text.value = f"Found {len(self.segments)} potential segments."
+                    status_text.value = f"Processing Complete! Found {len(self.segments)} segments."
                 except Exception as ex:
                     logger.error(ex)
                     status_text.value = f"Error: {ex}"
                 finally:
-                    step.set_can_next(True)
                     self._page_ref.update()
 
             threading.Thread(target=_worker).start()
 
-        analyze_btn = ft.ElevatedButton("Run Analysis", on_click=run_analysis)
-
-        step.set_content([
-            ft.Text("Analyze video to find performance cuts automatically."),
-            analyze_btn,
+        return ft.Column([
+            ft.Text("Step 1: 動画の音声同期と自動カット解析", size=20, weight=ft.FontWeight.BOLD),
+            vid_picker,
+            aud_picker,
+            ft.Divider(),
+            ft.Text("Audio Settings", weight=ft.FontWeight.BOLD),
+            ft.Row([offset_input, ft.Column([ft.Text("Video Vol"), vid_vol]), ft.Column([ft.Text("Mic Vol"), mic_vol])]),
+            ft.ElevatedButton("Start Processing", on_click=run_all_process),
             status_text
-        ])
-        return step
+        ], scroll=ft.ScrollMode.AUTO, expand=True)
 
-    # --- Step 4: Mapping ---
-    def _build_mapping_step(self):
-        step = WizardStep("Metadata Mapping", on_next=self._next_step, on_prev=self._prev_step)
-
-        api_key_input = ft.TextField(label="Gemini API Key (for PDF)", password=True)
+    def _build_mapping_view(self):
+        pdf_picker = FilePickerRow("PDF Program (Optional)", lambda p: setattr(self.current_project, 'pdf_path', p), file_types=["pdf"])
         status_text = ft.Text("")
 
         def run_mapping(e):
-            step.set_can_next(False)
             status_text.value = "Generating mapping..."
             self._page_ref.update()
 
             def _worker():
                 try:
                     segs = self.segments if hasattr(self, 'segments') and self.segments else [(0.0, 10.0)]
-                    self.orchestrator.generate_mapping(self.current_project, segs, str(api_key_input.value))
+                    self.orchestrator.generate_mapping(self.current_project, segs, self.api_key)
                     status_text.value = f"Successfully mapped {len(self.current_project.performances)} items."
                 except Exception as ex:
                     logger.error(ex)
                     status_text.value = f"Error: {ex}"
                 finally:
-                    step.set_can_next(True)
                     self._page_ref.update()
 
             threading.Thread(target=_worker).start()
 
-        map_btn = ft.ElevatedButton("Generate Mapping", on_click=run_mapping)
-
-        step.set_content([
-            api_key_input,
-            map_btn,
+        return ft.Column([
+            ft.Text("Step 2: プログラムプレビュー & 紐付け", size=20, weight=ft.FontWeight.BOLD),
+            pdf_picker,
+            ft.Text("※Gemini API Keyは設定タブで入力してください。"),
+            ft.ElevatedButton("Generate Mapping", on_click=run_mapping),
             status_text
-        ])
-        return step
+        ], scroll=ft.ScrollMode.AUTO, expand=True)
 
-    # --- Step 5: Render & Upload ---
-    def _build_render_step(self):
-        def on_finish(e):
-            # In Flet 0.21.2+ closing the window programmatically can be done like this:
-            self._page_ref.window.destroy() # type: ignore
-
-        step = WizardStep("Render & Upload", on_next=on_finish, on_prev=self._prev_step)
-
+    def _build_upload_view(self):
         status_text = ft.Text("")
         telop_checkbox = ft.Checkbox(label="Apply Telop", value=True)
 
@@ -206,11 +162,27 @@ class AppView(ft.Container):
                     self._page_ref.update()
             threading.Thread(target=_worker).start()
 
-        render_btn = ft.ElevatedButton("Start Render & Upload", on_click=run_render)
-
-        step.set_content([
+        return ft.Column([
+            ft.Text("Step 3: 動画出力 & YouTubeアップロード", size=20, weight=ft.FontWeight.BOLD),
             telop_checkbox,
-            render_btn,
+            ft.ElevatedButton("Start Render & Upload", on_click=run_render),
             status_text
-        ])
-        return step
+        ], scroll=ft.ScrollMode.AUTO, expand=True)
+
+    def _build_settings_view(self):
+        name_input = ft.TextField(label="Project Name", value=str(self.current_project.name),
+                                  on_change=lambda e: setattr(self.current_project, 'name', e.control.value))
+
+        out_picker = FilePickerRow("Output Directory", lambda p: setattr(self.current_project, 'output_dir', p), is_dir=True)
+
+        def set_api_key(e):
+            self.api_key = e.control.value
+
+        api_input = ft.TextField(label="Gemini API Key", password=True, on_change=set_api_key)
+
+        return ft.Column([
+            ft.Text("設定", size=20, weight=ft.FontWeight.BOLD),
+            name_input,
+            out_picker,
+            api_input
+        ], scroll=ft.ScrollMode.AUTO, expand=True)
