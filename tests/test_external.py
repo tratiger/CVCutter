@@ -15,14 +15,14 @@ def test_parse_local_csv(tmp_path):
     assert data[0]["performer"] == "Alice"
     assert data[1]["title"] == "Song B"
 
-@patch('cvcutter.data.external.genai.GenerativeModel')
-@patch('cvcutter.data.external.genai.upload_file')
-def test_parse_pdf_program(mock_upload, mock_model_cls):
-    mock_model = MagicMock()
-    mock_model_cls.return_value = mock_model
+@patch('cvcutter.data.external.genai.Client')
+def test_parse_pdf_program(mock_client_cls):
+    mock_client = MagicMock()
+    mock_client_cls.return_value = mock_client
+
     mock_response = MagicMock()
     mock_response.text = '```json\n[{"order": 1, "title": "Test", "performer": "Dev"}]\n```'
-    mock_model.generate_content.return_value = mock_response
+    mock_client.models.generate_content.return_value = mock_response
 
     service = MetadataService()
     result = service.parse_pdf_program(Path("dummy.pdf"), "dummy_key")

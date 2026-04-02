@@ -7,7 +7,7 @@ from cvcutter.ui.views import AppView
 from cvcutter.utils.logger import logger
 
 
-def main(page: ft.Page):
+def _app_target(page: ft.Page):
     logger.info("Starting CVCutter Application")
     page.title = "CVCutter"
     page.window_width = 800
@@ -26,5 +26,9 @@ def main(page: ft.Page):
     app_view = AppView(orchestrator, page)
     page.add(app_view)
 
+def main():
+    """CLI entry point."""
+    ft.app(target=_app_target)
+
 if __name__ == "__main__":
-    ft.app(target=main)
+    main()

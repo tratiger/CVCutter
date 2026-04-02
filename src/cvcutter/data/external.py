@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import google.generativeai as genai
+from google import genai
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -61,8 +61,6 @@ class MetadataService:
             parsed_data = []
             for resp in responses:
                 answers = resp.get('answers', {})
-                # This is simplified; a real impl needs to map specific question IDs
-                # to 'performer', 'is_public', 'description', etc.
                 row = {}
                 for q_id, answer in answers.items():
                     val = answer.get('textAnswers', {}).get('answers', [{}])[0].get('value', '')
@@ -86,10 +84,9 @@ class MetadataService:
         """Uses Gemini to parse PDF program into structured JSON metadata."""
         logger.info(f"Parsing PDF {pdf_path} using Gemini")
         try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            client = genai.Client(api_key=api_key)
 
-            uploaded_file = genai.upload_file(str(pdf_path))
+            uploaded_file = client.files.upload(file=str(pdf_path))
 
             prompt = """
             Extract the concert program from this document.
@@ -98,7 +95,10 @@ class MetadataService:
             Output ONLY valid JSON.
             """
 
-            response = model.generate_content([uploaded_file, prompt])
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=[uploaded_file, prompt]
+            )
 
             text = response.text.strip()
             if text.startswith("```json"): text = text[7:]
