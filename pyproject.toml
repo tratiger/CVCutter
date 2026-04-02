@@ -16,7 +16,7 @@ dependencies = [
     "google-api-python-client>=2.155.0",
     "pillow>=11.0.0",
     "pyinstaller>=6.11.1",
-    "flet>=0.21.2",
+    "flet==0.21.2",
     "sqlalchemy>=2.0.30",
     "faster-whisper>=1.0.1",
     "mediapipe>=0.10.11",
@@ -53,3 +53,8 @@ select = ["E", "F", "B", "I"]
 include = ["src"]
 typeCheckingMode = "basic"
 pythonVersion = "3.11"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408",
+]
