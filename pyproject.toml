@@ -5,7 +5,7 @@ description = "Concert Video Cutter & Uploader"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "moviepy>=1.0.3",
+    "moviepy>=2.0.0",
     "pydub>=0.25.1",
     "tqdm>=4.67.1",
     "opencv-python>=4.10.0.84",
@@ -14,10 +14,22 @@ dependencies = [
     "google-auth-oauthlib>=1.2.1",
     "google-auth-httplib2>=0.2.0",
     "google-api-python-client>=2.155.0",
-    "customtkinter>=5.2.2",
     "pillow>=11.0.0",
     "pyinstaller>=6.11.1",
     "google-generativeai>=0.3.0",
+    "flet>=0.21.2",
+    "sqlalchemy>=2.0.30",
+    "faster-whisper>=1.0.1",
+    "mediapipe>=0.10.11",
+    "av>=12.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.3.0",
+    "pyright>=1.1.350",
 ]
 
 [build-system]
@@ -28,4 +40,16 @@ build-backend = "hatchling.build"
 packages = ["src/cvcutter"]
 
 [project.scripts]
-cvcutter = "cvcutter.app:main"
+cvcutter = "cvcutter.main:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
