@@ -30,10 +30,15 @@ class PipelineOrchestrator:
         logger.info(f"Orchestrating audio sync for {project.name}")
         out_audio = Path(str(project.output_dir)) / f"{project.name}_mixed_audio.wav"
 
+
         self.audio_proc.mix_audio(
             Path(str(project.video_path)), Path(str(project.audio_path)), out_audio,
             video_vol=video_vol, mic_vol=mic_vol, offset_sec=offset_sec
         )
+
+        out_video = Path(str(project.output_dir)) / f"{project.name}_master.mp4"
+        self.video_proc.apply_audio(Path(str(project.video_path)), out_audio, out_video)
+
 
         out_video = Path(str(project.output_dir)) / f"{project.name}_master.mp4"
         self.video_proc.apply_audio(Path(str(project.video_path)), out_audio, out_video)
@@ -47,8 +52,12 @@ class PipelineOrchestrator:
         """Step 2: Detect clapping & bowing to suggest segments"""
         logger.info(f"Analyzing video for {project.name}")
 
+
         if project.status.value not in [ProjectStatus.AUDIO_SYNCED.value, ProjectStatus.CREATED.value]: # type: ignore
             logger.warning("Project not in correct state, but analyzing anyway.")
+
+        if str(project.video_path) in ["None", ""]:
+            raise CVCutterError("No video path provided for analysis.")
 
         if str(project.video_path) in ["None", ""]:
             raise CVCutterError("No video path provided for analysis.")
@@ -62,6 +71,9 @@ class PipelineOrchestrator:
             logger.info("No mixed audio found. Extracting audio track from video for analysis.")
             analysis_audio = Path(str(project.output_dir)) / f"{project.name}_extracted_audio.wav"
             self.audio_proc.extract_audio_from_video(Path(str(project.video_path)), analysis_audio)
+
+        clapping = self.analyzer.detect_clapping(analysis_audio)
+
 
         clapping = self.analyzer.detect_clapping(analysis_audio)
 
@@ -94,6 +106,7 @@ class PipelineOrchestrator:
             )
             self.session.add(perf)
 
+
         project.status = ProjectStatus.MAPPED # type: ignore
         self.session.commit()
 
@@ -107,6 +120,7 @@ class PipelineOrchestrator:
             self.video_proc.render_clip(
                 Path(str(project.video_path)), out_file, perf.start_time, perf.end_time, telop_text=telop # type: ignore
             )
+
 
         project.status = ProjectStatus.RENDERED # type: ignore
         self.session.commit()
@@ -122,6 +136,7 @@ class PipelineOrchestrator:
         for idx, perf in enumerate(project.performances):
             if perf.is_uploaded:
                 continue
+
 
             out_file = Path(str(project.output_dir)) / f"{idx+1:02d}_{perf.performer}_{perf.title}.mp4"
             if not out_file.exists():
@@ -145,11 +160,13 @@ class PipelineOrchestrator:
                 request = youtube.videos().insert(part=",".join(body.keys()), body=body, media_body=media)
                 response = request.execute()
 
+
                 perf.youtube_url = f"https://youtu.be/{response['id']}" # type: ignore
                 perf.is_uploaded = True # type: ignore
                 self.session.commit()
             except Exception as e:
                 logger.error(f"Upload failed for {perf.title}: {e}")
+
 
         project.status = ProjectStatus.UPLOADED # type: ignore
         self.session.commit()
