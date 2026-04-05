@@ -57,4 +57,5 @@ pythonVersion = "3.11"
 [dependency-groups]
 dev = [
     "pyright>=1.1.408",
+    "pytest>=9.0.2",
 ]

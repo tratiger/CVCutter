@@ -72,14 +72,44 @@ class PipelineOrchestrator:
             analysis_audio = Path(str(project.output_dir)) / f"{project.name}_extracted_audio.wav"
             self.audio_proc.extract_audio_from_video(Path(str(project.video_path)), analysis_audio)
 
-        clapping = self.analyzer.detect_clapping(analysis_audio)
+        import librosa
+        audio_duration = librosa.get_duration(path=str(analysis_audio))
 
-
         clapping = self.analyzer.detect_clapping(analysis_audio)
+        silences = self.analyzer.detect_silence(analysis_audio)
+
+        logger.info(f"Clapping segments: {clapping}")
+        logger.info(f"Silence segments: {silences}")
+
+        # Determine performances using the multimodal logic (silence/clapping indicates gaps)
+        segments = []
+        non_silences = []
+        current_t = 0.0
+
+        for s_start, s_end in silences:
+            if s_start - current_t > 20.0: # Minimum performance duration
+                non_silences.append((current_t, s_start))
+            current_t = s_end
+
+        if audio_duration - current_t > 20.0:
+            non_silences.append((current_t, audio_duration))
+
+        segments = non_silences
+
+        # Optional: Log bowing if possible, but rely on audio features
+        try:
+            bowing_timestamps = self.analyzer.detect_bowing(Path(str(project.video_path)))
+            logger.info(f"Bowing timestamps (for reference): {bowing_timestamps}")
+        except Exception:
+            pass
+
+        if not segments:
+            # Fallback
+            segments = clapping if clapping else [(0.0, 10.0)]
 
         project.status = ProjectStatus.VIDEO_ANALYZED # type: ignore
         self.session.commit()
-        return clapping
+        return segments
 
     def generate_mapping(self, project: Project, segments: List[tuple[float, float]], api_key: str):
         """Step 3: Map PDF to segments"""

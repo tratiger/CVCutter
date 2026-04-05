@@ -41,11 +41,25 @@ class VideoProcessor:
                 clip = video.subclipped(start_time, end_time)
 
                 if telop_text:
+                    # Determine font based on OS availability or fallback
+                    import platform
+                    font_choice = "Arial"
+                    if platform.system() == "Linux":
+                        font_choice = "DejaVu-Sans" # commonly available on Linux
+
                     # Create text clip
-                    txt_clip = TextClip(
-                        font="Arial", text=telop_text, font_size=70, color='white',
-                        bg_color='black', method='caption', size=(clip.size[0] - 100, None)
-                    ).with_position('center').with_duration(telop_duration)
+                    try:
+                        txt_clip = TextClip(
+                            font=font_choice, text=telop_text, font_size=70, color='white',
+                            bg_color='black', method='caption', size=(clip.size[0] - 100, None)
+                        ).with_position('center').with_duration(telop_duration)
+                    except Exception as fe:
+                        # Fallback if specific font fails
+                        logger.warning(f"Font failed, trying generic sans-serif: {fe}")
+                        txt_clip = TextClip(
+                            text=telop_text, font_size=70, color='white',
+                            bg_color='black', method='caption', size=(clip.size[0] - 100, None)
+                        ).with_position('center').with_duration(telop_duration)
 
                     # Add a semi-transparent background for text
                     bg_clip = ColorClip(size=clip.size, color=(0,0,0)).with_opacity(0.5).with_duration(telop_duration)
